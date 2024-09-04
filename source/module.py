@@ -26,19 +26,17 @@ class FourierFeaturization(nn.Module):
         self.proj = nn.Linear(d_time, d_model)
         self.register_buffer("B", inv_timescales)
     def forward(self, t):
-        h = t[:, None].float() @ self.B
+        h = t.float() @ self.B      # B, D/2
         h = torch.cat([h.cos(), h.sin()], dim=-1)
-        tx = self.proj(h)
+        tx = self.proj(h)[:, None, :]       # B, 1, D/2
         return tx
 
 
 class CoDiffEncodeInputs(EncodeInputs):
-    def __init__(self, d_model, d_time: int|None):
+    def __init__(self, d_model):
         super().__init__(d_model=d_model)
-        self.time_embed = FourierFeaturization(d_time=d_time, d_model=d_model) \
-            if d_time is not None else None
 
-    def forward(self, sequence_tokens, structure_tokens, t: torch.Tensor):
+    def forward(self, sequence_tokens, structure_tokens):
         B, L = structure_tokens.size()
         device = structure_tokens.device
 
@@ -65,11 +63,7 @@ class CoDiffEncodeInputs(EncodeInputs):
             function_tokens=function_tokens,
             residue_annotation_tokens=residue_annotation_tokens,
         )
-        if self.time_embed is not None:
-            tx = self.time_embed(t) 
-            return embed + tx
-        else:
-            return embed
+        return embed
 
 
 class CoDiffOutputHeads(nn.Module):

@@ -28,10 +28,7 @@ class CoDiffNetwork(PreTrainedModel):
     def __init__(self, conf, d3pm: D3PM):
         super(CoDiffNetwork, self).__init__(conf)
 
-        self.encoder = CoDiffEncodeInputs(
-            d_time=conf.d_time,
-            d_model=conf.d_model,
-        )
+        self.encoder = CoDiffEncodeInputs(d_model=conf.d_model)
         self.transformer = CoDiffTransformerStack(
             d_model=conf.d_model,
             d_time=conf.d_time,
@@ -57,7 +54,6 @@ class CoDiffNetwork(PreTrainedModel):
         x = self.encoder(
             structure_tokens=structure,
             sequence_tokens=sequence,
-            t=t
         )
         x, embedding = self.transformer(
             x=x, t=t, sequence_id=mask

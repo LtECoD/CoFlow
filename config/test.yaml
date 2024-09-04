@@ -9,15 +9,15 @@ diffusion:
 model:
   structure_track: true
   sequence_track: true
-  # d_time: 128
-  # d_model: 256
-  # n_layers: 6
-  # n_heads: 4
-  finetune_esm: true
-  d_time: 512
-  d_model: 1536
-  n_layers: 48
-  n_heads: 24
+  d_time: 128
+  d_model: 256
+  n_layers: 6
+  n_heads: 4
+  # finetune_esm: true
+  # d_time: 512
+  # d_model: 1536
+  # n_layers: 48
+  # n_heads: 24
 
 train:
   seed: 42
