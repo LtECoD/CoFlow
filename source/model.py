@@ -83,6 +83,7 @@ class CoDiffNetwork(PreTrainedModel):
             mask=mask,
         )
         
+        # loss
         if self.config.structure_track:
             structure_loss_items = self.diffusion.loss(
                 pred_x0_logits=structure_logits,
@@ -94,11 +95,15 @@ class CoDiffNetwork(PreTrainedModel):
             )
             struc_loss, struc_vb_loss, struc_ce_loss = structure_loss_items["loss"], \
                 structure_loss_items["vb_loss"], structure_loss_items["ce_loss"]
+            
+            # acc
             struc_pred = torch.argmax(structure_logits, dim=-1)
+            struc_mask = ((noised_structure == C.STRUCTURE_MASK_TOKEN) + mask) == 2
+            struc_acc = torch.sum((struc_pred == structure) * struc_mask) / torch.sum(struc_mask)
 
         else:
-            struc_loss, struc_vb_loss, struc_ce_loss = None, None, None
-            struc_pred = None
+            struc_loss, struc_vb_loss, struc_ce_loss = 0., 0., 0.
+            struc_acc = 0.
         
         if self.config.sequence_track:
             sequence_loss_items = self.diffusion.loss(
@@ -111,35 +116,33 @@ class CoDiffNetwork(PreTrainedModel):
             )
             seq_loss, seq_vb_loss, seq_ce_loss = sequence_loss_items['loss'], \
                 sequence_loss_items['vb_loss'], sequence_loss_items['ce_loss']
-            seq_pred = torch.argmax(sequence_logits, dim=-1)
             
+            # acc
+            seq_pred = torch.argmax(sequence_logits, dim=-1)
+            seq_mask = ((noised_sequence == C.SEQUENCE_MASK_TOKEN) + mask) == 2
+            seq_acc = torch.sum((seq_pred == sequence) * seq_mask) / torch.sum(seq_mask)
+
         else:
-            seq_loss, seq_vb_loss, seq_ce_loss = None, None, None
-            seq_pred = None
+            seq_loss, seq_vb_loss, seq_ce_loss = 0., 0., 0.
+            seq_acc = 0.
         
-        if struc_loss and seq_loss:
+        if self.config.structure_track and self.config.sequence_track:
             loss = struc_loss + seq_loss
-        elif struc_loss:
+        elif self.config.structure_track:
             loss = struc_loss
-        elif seq_loss:
+        elif self.config.sequence_track:
             loss =seq_loss
         else:
             raise ValueError
 
         return CoDiffOutput(
             loss=loss,
-            struc_track=torch.LongTensor([self.config.structure_track]).to(loss.device),
-            seq_track=torch.LongTensor([self.config.sequence_track]).to(loss.device),
             struc_vb_loss=struc_vb_loss,
             struc_ce_loss=struc_ce_loss,
-            struc_pred=struc_pred,
-            struc_gold=structure if self.config.structure_track else None,
-            struc_mask=(noised_structure==C.STRUCTURE_MASK_TOKEN).long() if self.config.structure_track else None,
+            struc_acc = struc_acc,
             seq_vb_loss=seq_vb_loss,
             seq_ce_loss=seq_ce_loss,
-            seq_pred=seq_pred,
-            seq_gold=sequence if self.config.sequence_track else None,
-            seq_mask=(noised_sequence==C.SEQUENCE_MASK_TOKEN).long() if self.config.sequence_track else None,
+            seq_acc = seq_acc,
             t=t,
         )
 
@@ -147,18 +150,12 @@ class CoDiffNetwork(PreTrainedModel):
 @dataclass
 class CoDiffOutput(ModelOutput):
     loss: torch.FloatTensor = None
-    struc_track: torch.LongTensor = None
-    seq_track: torch.LongTensor = None
     struc_vb_loss: torch.Tensor = None
     struc_ce_loss: torch.Tensor = None
-    struc_pred: torch.LongTensor = None
-    struc_gold: torch.LongTensor = None
-    struc_mask: torch.LongTensor = None
+    struc_acc: torch.Tensor = None
     seq_vb_loss: torch.Tensor = None
     seq_ce_loss: torch.Tensor = None
-    seq_pred: torch.LongTensor = None
-    seq_gold: torch.LongTensor = None
-    seq_mask: torch.LongTensor = None
+    seq_acc: torch.Tensor = None
     t: torch.FloatTensor = None
     
 

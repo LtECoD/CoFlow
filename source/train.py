@@ -10,55 +10,26 @@ from data import ProDataset
 from model import CoDiffConfig, CoDiffNetwork
 
 
-def metrics(eval_prediction):
-    acc = lambda pred, target, mask: \
-        np.sum(((pred==target)*mask).astype(np.int32)) / (np.sum(mask)+1.e-6)
-        
-        
+def metrics(eval_prediction):        
     pred = eval_prediction.predictions
-    struc_track = pred[0][0]
-    seq_track = pred[1][0]
-        
-    if struc_track and seq_track:
-        struc_vb = np.mean(pred[2])
-        struc_ce = np.mean(pred[3])
-        struc_pred, struc_gold, struc_mask = pred[4], pred[5], pred[6]
-        
-        seq_vb = np.mean(pred[7])
-        seq_ce = np.mean(pred[8])
-        seq_pred, seq_gold, seq_mask = pred[9], pred[10], pred[11]
 
-        struc_acc = acc(struc_pred, struc_gold, struc_mask)
-        seq_acc = acc(seq_pred, seq_gold, seq_mask)
-        return {
-            "struc_acc": round(struc_acc, 4),
-            "struc_vb": round(struc_vb, 4),
-            "struc_ce": round(struc_ce, 4),
-            "seq_acc": round(seq_acc, 4),
-            "seq_vb": round(seq_vb, 4),
-            "seq_ce": round(seq_ce, 4),
-        }
-    elif struc_track:
-        struc_vb = np.mean(pred[2])
-        struc_ce = np.mean(pred[3])
-        struc_pred, struc_gold, struc_mask = pred[4], pred[5], pred[6]
-        struc_acc = acc(struc_pred, struc_gold, struc_mask)
-        return {
-            "struc_acc": round(struc_acc, 4),
-            "struc_vb": round(struc_vb, 4),
-            "struc_ce": round(struc_ce, 4),
-        }
-    elif seq_track:
-        seq_vb = np.mean(pred[2])
-        seq_ce = np.mean(pred[3])
-        seq_pred, seq_gold, seq_mask = pred[4], pred[5], pred[6]
-        seq_acc = acc(seq_pred, seq_gold, seq_mask)
-        return {
-            "seq_acc": round(seq_acc, 4),
-            "seq_vb": round(seq_vb, 4),
-            "seq_ce": round(seq_ce, 4),
-        }
+    struc_vb = np.mean(pred[0])
+    struc_ce = np.mean(pred[1])
+    struc_acc = np.mean(pred[2])
     
+    seq_vb = np.mean(pred[3])
+    seq_ce = np.mean(pred[4])
+    seq_acc = np.mean(pred[5])
+
+    return {
+        "struc_acc": np.round(struc_acc, 4),
+        "struc_vb": np.round(struc_vb, 4),
+        "struc_ce": np.round(struc_ce, 4),
+        "seq_acc": np.round(seq_acc, 4),
+        "seq_vb": np.round(seq_vb, 4),
+        "seq_ce": np.round(seq_ce, 4),
+    }
+
 
 def build_trainer(model, trainset, valset, train_args, collate_fn):    
     config = TrainingArguments(

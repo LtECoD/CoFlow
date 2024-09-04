@@ -1,0 +1,39 @@
+data:
+  struc_file: "./data/struc_example.txt"
+  seq_file: "./data/seq_example.txt"
+
+diffusion:
+  T: 1000
+  hybrid_loss_coeff: 0.
+
+model:
+  structure_track: true
+  sequence_track: true
+  d_time: 128
+  d_model: 256
+  n_layers: 6
+  n_heads: 4
+
+train:
+  seed: 42
+  do_train: true
+  optim: "adamw_torch"
+  adam_beta1: 0.9
+  adam_beta2: 0.98
+  learning_rate: 2.e-4
+  lr_scheduler_type: "constant"
+  weight_decay: 0.01
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 1
+  num_train_epochs: 100
+  save_total_limit: 10
+  output_dir: "./save/test"
+  overwrite_output_dir: True
+  bf16: False
+  fp16: True
+  save_strategy: "steps"
+  save_steps: 1000
+  eval_strategy: "steps"
+  eval_steps: 10
+  eval_accumulation_steps: 50
+  per_device_eval_batch_size: 4
