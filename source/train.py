@@ -1,8 +1,10 @@
 import os
 import sys
+import torch
 import numpy as np
 from omegaconf import OmegaConf
 from torch.utils.data import random_split
+from esm.utils.constants.esm3 import data_root
 from transformers import TrainingArguments, Trainer
 
 from diffusion import D3PM
@@ -68,6 +70,11 @@ def main():
 
     d3pm = D3PM(conf=diff_args)
     model = CoDiffNetwork(CoDiffConfig(**model_args), d3pm=d3pm)
+    # load esm model
+    if getattr(model_args, "finetune_esm", False):
+        state_dict = torch.load(
+            data_root() / "data/weights/esm3_sm_open_v1.pth")
+        model.load_state_dict(state_dict, strict=False) 
     dataset = ProDataset(data_args)
     trainset, valset = random_split(dataset, (0.96, 0.04))
 
