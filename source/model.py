@@ -42,8 +42,8 @@ class CoDiffNetwork(PreTrainedModel):
         )
         self.diffusion = d3pm
 
-        # self.sample = lambda **kwargs: self.gen_model.sample(
-        #     denoise_func=self.denoise, **kwargs)
+        self.sample = lambda **kwargs: self.diffusion.reverse(
+            denoise_func=self.denoise, **kwargs)
 
     def denoise(self, structure, sequence, t, mask=None):
         B, L = structure.size()
@@ -81,20 +81,20 @@ class CoDiffNetwork(PreTrainedModel):
         
         # loss
         if self.config.structure_track:
+            struc_mask = ((noised_structure == C.STRUCTURE_MASK_TOKEN) + mask) == 2
             structure_loss_items = self.diffusion.loss(
                 pred_x0_logits=structure_logits,
                 x_0=structure,
                 x_t=noised_structure,
                 t=t,
                 track="structure",
-                mask=mask,
+                mask=struc_mask.long(),
             )
             struc_loss, struc_vb_loss, struc_ce_loss = structure_loss_items["loss"], \
                 structure_loss_items["vb_loss"], structure_loss_items["ce_loss"]
             
             # acc
             struc_pred = torch.argmax(structure_logits, dim=-1)
-            struc_mask = ((noised_structure == C.STRUCTURE_MASK_TOKEN) + mask) == 2
             struc_acc = torch.sum((struc_pred == structure) * struc_mask) / torch.sum(struc_mask)
 
         else:
@@ -102,22 +102,21 @@ class CoDiffNetwork(PreTrainedModel):
             struc_acc = 0.
         
         if self.config.sequence_track:
+            seq_mask = ((noised_sequence == C.SEQUENCE_MASK_TOKEN) + mask) == 2
             sequence_loss_items = self.diffusion.loss(
                 pred_x0_logits=sequence_logits,
                 x_0=sequence,
                 x_t=noised_sequence,
                 t=t,
                 track="sequence",
-                mask=mask,
+                mask=seq_mask.long(),
             )
             seq_loss, seq_vb_loss, seq_ce_loss = sequence_loss_items['loss'], \
                 sequence_loss_items['vb_loss'], sequence_loss_items['ce_loss']
             
             # acc
             seq_pred = torch.argmax(sequence_logits, dim=-1)
-            seq_mask = ((noised_sequence == C.SEQUENCE_MASK_TOKEN) + mask) == 2
             seq_acc = torch.sum((seq_pred == sequence) * seq_mask) / torch.sum(seq_mask)
-
         else:
             seq_loss, seq_vb_loss, seq_ce_loss = 0., 0., 0.
             seq_acc = 0.

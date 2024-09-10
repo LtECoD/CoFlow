@@ -3,11 +3,6 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
-from transformers.generation import (
-    TopKLogitsWarper,
-    TopPLogitsWarper,
-    TemperatureLogitsWarper
-)
 
 import esm.utils.constants.esm3 as C
 
@@ -20,7 +15,7 @@ class D3PM(nn.Module):
         setattr(conf, "seq_vocab_size", len(C.SEQUENCE_VOCAB))
         self.conf = conf
     
-        self.eps = 1.e-6
+        self.eps = 1.e-10
         self._build_params()
 
     def _build_params(self):
@@ -96,10 +91,9 @@ class D3PM(nn.Module):
         else:
             x_0_logits = x_0.clone()      # B, L, N
         B, L, N = x_0_logits.size()
+        softmax_x_0 = torch.softmax(x_0_logits, dim=-1)
 
         fact1 = self._at(x_t, q_onestep_transposed)
-
-        softmax_x_0 = torch.softmax(x_0_logits, dim=-1)
         fact2 = softmax_x_0 @ q_mat     # B, L, N
         out = torch.log(fact1+self.eps) + torch.log(fact2+self.eps)
 
@@ -180,37 +174,218 @@ class D3PM(nn.Module):
         mat[:, :, mask_index] = mat[:, :, mask_index] + (1.-self.alpha[t])[:, None]
         return mat
 
+    @torch.no_grad()
+    def reverse(
+        self,
+        denoise_func,
+        strategy:str,
+        length=None,
+        structure=None,
+        sequence=None,
+        temperature=1.,
+        device="cpu",
+    ):
+        """
+        strategy:
+            "0": sequence -> structure
+            "1": structure -> sequence
+            "2": seq_i, struc_i -> seq_{i+1}, struc_{i+1}
+            "3": seq_i -> struc_i -> seq_{i+1} -> struc_{i+1}
+            "4": struc_i -> seq_i -> struc_{i+1} -> seq_{i+1}
+        """
+        if (structure is None) and (sequence is None):
+            assert length is not None
+            structure = torch.ones(1, length).long() * C.STRUCTURE_MASK_TOKEN
+            sequence = torch.ones(1, length).long() * C.SEQUENCE_MASK_TOKEN
+        elif structure is None:
+            structure = torch.ones_like(sequence) * C.STRUCTURE_MASK_TOKEN
+        elif sequence is None:
+            sequence = torch.ones_like(structure) * C.SEQUENCE_MASK_TOKEN
+        else:
+            assert structure.size() == sequence.size()
+        structure, sequence = structure.to(device), sequence.to(device)
+
+        start_time = list(range(self.conf.T, 0, -1))
+        end_time = start_time[1:] + [0]
+
+        if strategy == 0:
+            iterator = tqdm(zip(start_time, end_time))
+            iterator.set_description("Generate Sequence")
+
+            # sequence generation
+            for idx, (t1, t0) in enumerate(iterator):
+                struc_logits, seq_logits = denoise_func(
+                    structure=structure, sequence=sequence,
+                    t=torch.LongTensor([t1]).to(device)) # 1, L, N
+                sequence = self._sample_next_x(
+                    logits=seq_logits, xt=sequence, t1=t1, t0=t0, device=device,
+                    track="sequence", temperature=temperature
+                )
+                
+            iterator = tqdm(zip(start_time, end_time))
+            iterator.set_description("Generate Structure")
+            for idx, (t1, t0) in enumerate(iterator):
+                struc_logits, seq_logits = denoise_func(
+                    structure=structure, sequence=sequence,
+                    t=torch.LongTensor([t1]).to(device)) # 1, L, N
+                structure = self._sample_next_x(
+                    logits=struc_logits, xt=structure, t1=t1, t0=t0, device=device,
+                    track="structure", temperature=temperature
+                )
+            return structure.squeeze(0), sequence.squeeze(0)
+        elif strategy == 1:
+            iterator = tqdm(zip(start_time, end_time))
+            iterator.set_description("Generate Structure")
+            for idx, (t1, t0) in enumerate(iterator):
+                struc_logits, seq_logits = denoise_func(
+                    structure=structure, sequence=sequence,
+                    t=torch.LongTensor([t1]).to(device)) # 1, L, N
+                structure = self._sample_next_x(
+                    logits=struc_logits, xt=structure, t1=t1, t0=t0, device=device,
+                    track="structure", temperature=temperature
+                )
+
+            iterator = tqdm(zip(start_time, end_time))
+            iterator.set_description("Generate Sequence")
+
+            # sequence generation
+            for idx, (t1, t0) in enumerate(iterator):
+                struc_logits, seq_logits = denoise_func(
+                    structure=structure, sequence=sequence,
+                    t=torch.LongTensor([t1]).to(device)) # 1, L, N
+                sequence = self._sample_next_x(
+                    logits=seq_logits, xt=sequence, t1=t1, t0=t0, device=device,
+                    track="sequence", temperature=temperature
+                )
+            return structure.squeeze(0), sequence.squeeze(0)
+        elif strategy == 2:
+            iterator = tqdm(zip(start_time, end_time))
+            iterator.set_description("Co Generation")
+            for idx, (t1, t0) in enumerate(iterator):                
+                struc_logits, seq_logits = denoise_func(
+                    structure=structure, sequence=sequence,
+                    t=torch.LongTensor([t1]).to(device)) # 1, L, N
+                structure = self._sample_next_x(
+                    logits=struc_logits, xt=structure, t1=t1, t0=t0, device=device,
+                    track="structure", temperature=temperature
+                )
+                sequence = self._sample_next_x(
+                    logits=seq_logits, xt=sequence, t1=t1, t0=t0, device=device,
+                    track="sequence", temperature=temperature
+                )
+            return structure.squeeze(0), sequence.squeeze(0)
+        elif strategy == 3:
+            iterator = tqdm(zip(start_time, end_time))
+            iterator.set_description("Co Generation")
+            for idx, (t1, t0) in enumerate(iterator):                
+                struc_logits, seq_logits = denoise_func(
+                    structure=structure, sequence=sequence,
+                    t=torch.LongTensor([t1]).to(device)) # 1, L, N
+                sequence = self._sample_next_x(
+                    logits=seq_logits, xt=sequence, t1=t1, t0=t0, device=device,
+                    track="sequence", temperature=temperature
+                )
+                
+                struc_logits, seq_logits = denoise_func(
+                    structure=structure, sequence=sequence,
+                    t=torch.LongTensor([t1]).to(device)) # 1, L, N
+                structure = self._sample_next_x(
+                    logits=struc_logits, xt=structure, t1=t1, t0=t0, device=device,
+                    track="structure", temperature=temperature
+                )
+                
+                # print(idx)
+                # print(sequence.tolist())
+                # print(structure.tolist())
+
+            return structure.squeeze(0), sequence.squeeze(0)
+
+
+    def _sample_next_x(
+        self, logits, xt, t1, t0, device, track, temperature):        
+
+        if track=="sequence":
+            vocab_size = self.conf.seq_vocab_size
+            mask_token_index = C.SEQUENCE_MASK_TOKEN
+            # disable invalid tokens
+            logits[:, :, :4] = float("-inf")
+            logits[:, :, -4:] = float("-inf")
+        
+        elif track == "structure":
+            vocab_size = self.conf.struc_vocab_size
+            mask_token_index = C.STRUCTURE_MASK_TOKEN
+            logits[:, :, 4096:] = float("-inf")
+
+        _, L, N = logits.size()
+        logits = logits / temperature
+        if t0 == 0:
+            prob = torch.softmax(logits, dim=-1)
+            next_x = torch.where(
+                xt==mask_token_index,
+                torch.multinomial(input=prob.view(L, N), num_samples=1).view(1, L),
+                xt
+            )
+            return next_x
+        else:
+            prob = torch.softmax(logits, dim=-1)
+
+        q_onestep_mat = self.absorbing_q_onestep_mat(
+            N=vocab_size,
+            mask_index=mask_token_index,
+            t=torch.LongTensor([t1]).to(device)
+        )    # 1, N, N
+        q_mat = self.absorbing_q_mat(
+            N=vocab_size,
+            mask_index=mask_token_index,
+            t=torch.LongTensor([t0]).to(device),
+        )    # 1, N, N
+        
+        fact1 = self._at(xt, q_onestep_mat.transpose(1, 2))
+        fact2 = prob @ q_mat    
+        
+        next_logits = torch.log(fact1*fact2+self.eps)        
+        next_prob = torch.softmax(next_logits, dim=-1)  # 1, L, N
+        next_x = torch.multinomial(input=next_prob.view(L, N), num_samples=1).view(1, L)   
+        return next_x
+
 
 # if __name__ == "__main__":
 #     from omegaconf import OmegaConf
-#     conf = OmegaConf.load("./config.yaml")
-
 #     device = "cuda:0"
-#     diffusion = D3PM(conf.diffusion).to(device)
+#     diffusion = D3PM(OmegaConf.create({
+#         "T": 1000,
+#         "hybrid_loss_coeff": 0.
+#     })).to(device)
 
 #     t = torch.LongTensor([999]).to(device)
 #     q_onestep_mat = diffusion.absorbing_q_onestep_mat(N=4, mask_index=3, t=t)
 #     q_onestep_mat_transposed = q_onestep_mat.transpose(1, 2)
 #     q_mat = diffusion.absorbing_q_mat(N=4, mask_index=3, t=t-1)
-
-#     x_0 = torch.LongTensor([[0, 1]]).to(device)
-#     x_t = torch.LongTensor([[0, 3]]).to(device)
-
-#     fact1 = diffusion._at(x_t, q_onestep_mat_transposed)
-#     fact2 = diffusion._at(x_0, q_mat)
+#     q_multistep_mat = diffusion.absorbing_q_multistep_mat(
+#         N=4, mask_index=3, start=1, end=998, device=device)
     
-#     pred_x_0 = torch.randn(1, 2, 4).to(device)
-#     pred_x_0_softmaxed = torch.softmax(pred_x_0, dim=-1)
-#     pred_fact2 = pred_x_0_softmaxed @ q_mat
+#     print(q_mat)
+#     print(q_multistep_mat)
+    
 
-#     # print(pred_x_0_softmaxed)
-#     # print(q_mat)
-#     print(fact1)
-#     print(fact2)
-#     print(pred_fact2)
+    # x_0 = torch.LongTensor([[0, 1]]).to(device)
+    # x_t = torch.LongTensor([[0, 3]]).to(device)
 
-#     print(fact1*fact2) 
-#     print(fact1*pred_fact2)
+    # fact1 = diffusion._at(x_t, q_onestep_mat_transposed)
+    # fact2 = diffusion._at(x_0, q_mat)
+    
+    # pred_x_0 = torch.randn(1, 2, 4).to(device)
+    # pred_x_0_softmaxed = torch.softmax(pred_x_0, dim=-1)
+    # pred_fact2 = pred_x_0_softmaxed @ q_mat
 
-#     # print(torch.softmax(fact1*fact2+1e-8, dim=-1)) 
-#     # print(torch.softmax(fact1*pred_fact2+diffusion.eps, dim=-1))
+    # # print(pred_x_0_softmaxed)
+    # # print(q_mat)
+    # print(fact1)
+    # print(fact2)
+    # print(pred_fact2)
+
+    # print(fact1*fact2) 
+    # print(fact1*pred_fact2)
+
+    # # print(torch.softmax(fact1*fact2+1e-8, dim=-1)) 
+    # # print(torch.softmax(fact1*pred_fact2+diffusion.eps, dim=-1))
