@@ -1,6 +1,5 @@
 import math
 import torch
-import numpy as np
 import torch.nn as nn
 
 import esm.utils.constants.esm3 as C
@@ -14,25 +13,25 @@ from esm.layers.blocks import (
 
 
 class FourierFeaturization(nn.Module):
-    def __init__(self, d_time, d_model, max_timescale=10000, min_timescale=1):
+    def __init__(self, d_time, d_model, max_positions=2000):
         super().__init__()
         assert d_time %2 == 0, "d_time needs to be even for this featurization, try again!"
-        num_timescales = d_time // 2
-        inv_timescales = torch.logspace(
-            -np.log10(min_timescale),
-            -np.log10(max_timescale),
-            num_timescales,
-        ).unsqueeze(0)      # 1, D/2
+        half_dim = d_time // 2
+
+        emb = math.log(max_positions) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
+        self.register_buffer("emb", emb.unsqueeze(0))    # 1, D/2
+        
         self.proj = nn.Linear(d_time, d_model)
-        self.register_buffer("B", inv_timescales)
+
     def forward(self, t):
-        h = t.float() @ self.B      # B, D/2
+        h = t.float() @ self.emb      # B, D/2
         h = torch.cat([h.cos(), h.sin()], dim=-1)
         tx = self.proj(h)[:, None, :]       # B, 1, D/2
         return tx
 
 
-class CoDiffEncodeInputs(EncodeInputs):
+class CoFlowEncodeInputs(EncodeInputs):
     def __init__(self, d_model):
         super().__init__(d_model=d_model)
 
@@ -66,12 +65,12 @@ class CoDiffEncodeInputs(EncodeInputs):
         return embed
 
 
-class CoDiffOutputHeads(nn.Module):
+class CoFlowOutputHeads(nn.Module):
     def __init__(self, d_model, sequence_track, structure_track):
         super().__init__()
         self.structure_head = RegressionHead(d_model, 4096) if structure_track else None
         self.sequence_head = RegressionHead(d_model, 64) if sequence_track else None
-        self.struc_fill_value = -1.e6
+        self.struc_fill_value = -1.e10
 
     def forward(self, x: torch.Tensor):
         structure_logits = self.structure_head(x) if self.structure_head else None
@@ -90,17 +89,17 @@ class CoDiffOutputHeads(nn.Module):
         return structure_logits, sequence_logits
 
 
-class CoDiffTransformerBlock(nn.Module):
+class CoFlowTransformerBlock(nn.Module):
     def __init__(
         self,
         d_model: int,
         d_time: int|None,
         n_heads: int,
-        bias: bool = False,
-        expansion_ratio: float = 4.0,
-        residue_scaling_factor: float = 1,
-        qk_layernorm: bool = True,
-        ffn_type: str = "swiglu",  # swiglu | gelu
+        bias: bool,
+        expansion_ratio: float,
+        residue_scaling_factor: float,
+        qk_layernorm: bool,
+        ffn_type: str,  # swiglu | gelu
     ):
         super().__init__()
         self.time_embed = FourierFeaturization(d_time=d_time, d_model=d_model) \
@@ -137,7 +136,7 @@ class CoDiffTransformerBlock(nn.Module):
         return x
 
 
-class CoDiffTransformerStack(nn.Module):
+class CoFlowTransformerStack(nn.Module):
     def __init__(
         self,
         d_model: int,
@@ -153,7 +152,7 @@ class CoDiffTransformerStack(nn.Module):
         super().__init__()
         self.blocks = nn.ModuleList(
             [
-                CoDiffTransformerBlock(
+                CoFlowTransformerBlock(
                     d_model=d_model,
                     d_time=d_time,
                     n_heads=n_heads,

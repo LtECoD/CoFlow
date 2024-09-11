@@ -1,10 +1,12 @@
 data:
-  struc_file: "./data/struc.txt"
-  seq_file: "./data/seq.txt"
-
-diffusion:
-  T: 1000
-  hybrid_loss_coeff: 0.
+  dir: "./data"
+  train_prefix: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  valid_prefix: [10]
+  train_num: 16271519
+  valid_num: 164318
+  shuffle: True
+  min_len: 40
+  max_len: 512
 
 model:
   structure_track: true
@@ -14,6 +16,7 @@ model:
   d_model: 1536
   n_layers: 48
   n_heads: 24
+  eps: 1.e-10
 
 train:
   seed: 42
@@ -25,15 +28,15 @@ train:
   lr_scheduler_type: "constant"
   per_device_train_batch_size: 12
   gradient_accumulation_steps: 2
-  num_train_epochs: 50
+  max_steps: 1000000
   save_total_limit: 10
   output_dir: "./save/finetune"
   overwrite_output_dir: True
-  bf16: true
-  fp16: false
+  bf16: True
+  fp16: False
   save_strategy: "steps"
-  save_steps: 2000
+  save_steps: 10000
   eval_strategy: "steps"
-  eval_steps: 2000
+  eval_steps: 10000
   eval_accumulation_steps: 50
   per_device_eval_batch_size: 4

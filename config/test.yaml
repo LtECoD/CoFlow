@@ -1,23 +1,26 @@
 data:
-  struc_file: "./data/struc_example.txt"
-  seq_file: "./data/seq_example.txt"
-
-diffusion:
-  T: 1000
-  hybrid_loss_coeff: 0.
+  dir: "./data"
+  train_prefix: [1, 2]
+  valid_prefix: [2]
+  train_num: 20000
+  valid_num: 10000
+  shuffle: True
+  min_len: 40
+  max_len: 512
 
 model:
   structure_track: true
   sequence_track: true
   d_time: 128
   d_model: 256
-  n_layers: 6
+  n_layers: 4
   n_heads: 4
   # finetune_esm: true
   # d_time: 512
   # d_model: 1536
   # n_layers: 48
   # n_heads: 24
+  eps: 1.e-10
 
 train:
   seed: 42
@@ -28,9 +31,10 @@ train:
   learning_rate: 2.e-4
   lr_scheduler_type: "constant"
   weight_decay: 0.01
-  per_device_train_batch_size: 2
+  per_device_train_batch_size: 4
   gradient_accumulation_steps: 1
-  num_train_epochs: 100
+
+  max_steps: 2000
   save_total_limit: 10
   output_dir: "./save/test"
   overwrite_output_dir: True
@@ -39,6 +43,6 @@ train:
   save_strategy: "steps"
   save_steps: 1000
   eval_strategy: "steps"
-  eval_steps: 10
+  eval_steps: 1000
   eval_accumulation_steps: 50
   per_device_eval_batch_size: 4
