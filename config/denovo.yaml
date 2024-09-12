@@ -1,9 +1,9 @@
 data:
   dir: "/lustre/home/yangsen/database/ESMAtlas/script_for_all/txt/"
-  train_prefix: [0, 1, 2, 3, 4, 5, 6, 7, 8]
-  valid_prefix: [9]
-  train_num: 14792651
-  valid_num: 1643186
+  train_prefix: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  valid_prefix: [10]
+  train_num: 16435837
+  valid_num: 164318
   shuffle: True
   min_len: 40
   max_len: 512
@@ -24,7 +24,7 @@ train:
   optim: "adamw_torch"
   adam_beta1: 0.9
   adam_beta2: 0.98
-  learning_rate: 2.e-4
+  learning_rate: 3.e-4
   lr_scheduler_type: "constant"
   weight_decay: 0.01
   warmup_steps: 1000

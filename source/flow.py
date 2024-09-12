@@ -1,8 +1,9 @@
 import torch
-import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
+from functools import partial
+from torch.distributions.categorical import Categorical
 
 import esm.utils.constants.esm3 as C
 
@@ -42,7 +43,6 @@ class Flow(nn.Module):
             reduction="none",
         )
         ce_loss = ce_loss.view(B, L)
-
         if mask is None:
             mask = torch.ones(B, L).to(x_0.device)        
         loss = torch.sum(ce_loss * mask) / (torch.sum(mask) + self.eps)
@@ -59,174 +59,179 @@ class Flow(nn.Module):
         denoise_func,
         strategy:str,
         length=None,
+        steps:int=100,
+        eta: float=0.,
         structure=None,
         sequence=None,
-        temperature=1.,
+        sequence_temp=1.,
+        structure_temp=1.,
         device="cpu",
     ):
-        raise NotImplementedError
-    #     """
-    #     strategy:
-    #         "0": sequence -> structure
-    #         "1": structure -> sequence
-    #         "2": seq_i, struc_i -> seq_{i+1}, struc_{i+1}
-    #         "3": seq_i -> struc_i -> seq_{i+1} -> struc_{i+1}
-    #         "4": struc_i -> seq_i -> struc_{i+1} -> seq_{i+1}
-    #     """
-    #     if (structure is None) and (sequence is None):
-    #         assert length is not None
-    #         structure = torch.ones(1, length).long() * C.STRUCTURE_MASK_TOKEN
-    #         sequence = torch.ones(1, length).long() * C.SEQUENCE_MASK_TOKEN
-    #     elif structure is None:
-    #         structure = torch.ones_like(sequence) * C.STRUCTURE_MASK_TOKEN
-    #     elif sequence is None:
-    #         sequence = torch.ones_like(structure) * C.SEQUENCE_MASK_TOKEN
-    #     else:
-    #         assert structure.size() == sequence.size()
-    #     structure, sequence = structure.to(device), sequence.to(device)
+        """
+        strategy:
+            "0": sequence -> structure
+            "1": structure -> sequence
+            "2": seq_i, struc_i -> seq_{i+1}, struc_{i+1}, sync
+            "3": seq_i, struc_i -> seq_{i+1}, struc_{i+1}, async
 
-    #     start_time = list(range(self.conf.T, 0, -1))
-    #     end_time = start_time[1:] + [0]
-
-    #     if strategy == 0:
-    #         iterator = tqdm(zip(start_time, end_time))
-    #         iterator.set_description("Generate Sequence")
-
-    #         # sequence generation
-    #         for idx, (t1, t0) in enumerate(iterator):
-    #             struc_logits, seq_logits = denoise_func(
-    #                 structure=structure, sequence=sequence,
-    #                 t=torch.LongTensor([t1]).to(device)) # 1, L, N
-    #             sequence = self._sample_next_x(
-    #                 logits=seq_logits, xt=sequence, t1=t1, t0=t0, device=device,
-    #                 track="sequence", temperature=temperature
-    #             )
-                
-    #         iterator = tqdm(zip(start_time, end_time))
-    #         iterator.set_description("Generate Structure")
-    #         for idx, (t1, t0) in enumerate(iterator):
-    #             struc_logits, seq_logits = denoise_func(
-    #                 structure=structure, sequence=sequence,
-    #                 t=torch.LongTensor([t1]).to(device)) # 1, L, N
-    #             structure = self._sample_next_x(
-    #                 logits=struc_logits, xt=structure, t1=t1, t0=t0, device=device,
-    #                 track="structure", temperature=temperature
-    #             )
-    #         return structure.squeeze(0), sequence.squeeze(0)
-    #     elif strategy == 1:
-    #         iterator = tqdm(zip(start_time, end_time))
-    #         iterator.set_description("Generate Structure")
-    #         for idx, (t1, t0) in enumerate(iterator):
-    #             struc_logits, seq_logits = denoise_func(
-    #                 structure=structure, sequence=sequence,
-    #                 t=torch.LongTensor([t1]).to(device)) # 1, L, N
-    #             structure = self._sample_next_x(
-    #                 logits=struc_logits, xt=structure, t1=t1, t0=t0, device=device,
-    #                 track="structure", temperature=temperature
-    #             )
-
-    #         iterator = tqdm(zip(start_time, end_time))
-    #         iterator.set_description("Generate Sequence")
-
-    #         # sequence generation
-    #         for idx, (t1, t0) in enumerate(iterator):
-    #             struc_logits, seq_logits = denoise_func(
-    #                 structure=structure, sequence=sequence,
-    #                 t=torch.LongTensor([t1]).to(device)) # 1, L, N
-    #             sequence = self._sample_next_x(
-    #                 logits=seq_logits, xt=sequence, t1=t1, t0=t0, device=device,
-    #                 track="sequence", temperature=temperature
-    #             )
-    #         return structure.squeeze(0), sequence.squeeze(0)
-    #     elif strategy == 2:
-    #         iterator = tqdm(zip(start_time, end_time))
-    #         iterator.set_description("Co Generation")
-    #         for idx, (t1, t0) in enumerate(iterator):                
-    #             struc_logits, seq_logits = denoise_func(
-    #                 structure=structure, sequence=sequence,
-    #                 t=torch.LongTensor([t1]).to(device)) # 1, L, N
-    #             structure = self._sample_next_x(
-    #                 logits=struc_logits, xt=structure, t1=t1, t0=t0, device=device,
-    #                 track="structure", temperature=temperature
-    #             )
-    #             sequence = self._sample_next_x(
-    #                 logits=seq_logits, xt=sequence, t1=t1, t0=t0, device=device,
-    #                 track="sequence", temperature=temperature
-    #             )
-    #         return structure.squeeze(0), sequence.squeeze(0)
-    #     elif strategy == 3:
-    #         iterator = tqdm(zip(start_time, end_time))
-    #         iterator.set_description("Co Generation")
-    #         for idx, (t1, t0) in enumerate(iterator):                
-    #             struc_logits, seq_logits = denoise_func(
-    #                 structure=structure, sequence=sequence,
-    #                 t=torch.LongTensor([t1]).to(device)) # 1, L, N
-    #             sequence = self._sample_next_x(
-    #                 logits=seq_logits, xt=sequence, t1=t1, t0=t0, device=device,
-    #                 track="sequence", temperature=temperature
-    #             )
-                
-    #             struc_logits, seq_logits = denoise_func(
-    #                 structure=structure, sequence=sequence,
-    #                 t=torch.LongTensor([t1]).to(device)) # 1, L, N
-    #             structure = self._sample_next_x(
-    #                 logits=struc_logits, xt=structure, t1=t1, t0=t0, device=device,
-    #                 track="structure", temperature=temperature
-    #             )
-                
-    #             # print(idx)
-    #             # print(sequence.tolist())
-    #             # print(structure.tolist())
-
-    #         return structure.squeeze(0), sequence.squeeze(0)
-
-
-    # def _sample_next_x(
-    #     self, logits, xt, t1, t0, device, track, temperature):        
-
-    #     if track=="sequence":
-    #         vocab_size = self.conf.seq_vocab_size
-    #         mask_token_index = C.SEQUENCE_MASK_TOKEN
-    #         # disable invalid tokens
-    #         logits[:, :, :4] = float("-inf")
-    #         logits[:, :, -4:] = float("-inf")
+        """
+        if (structure is None) and (sequence is None):
+            assert length is not None
+            structure = torch.ones(1, length).long() * C.STRUCTURE_MASK_TOKEN
+            sequence = torch.ones(1, length).long() * C.SEQUENCE_MASK_TOKEN
+        elif structure is None:
+            structure = torch.ones_like(sequence) * C.STRUCTURE_MASK_TOKEN
+        elif sequence is None:
+            sequence = torch.ones_like(structure) * C.SEQUENCE_MASK_TOKEN
+        else:
+            assert structure.size() == sequence.size()    
+        structure, sequence = structure.to(device), sequence.to(device)
         
-    #     elif track == "structure":
-    #         vocab_size = self.conf.struc_vocab_size
-    #         mask_token_index = C.STRUCTURE_MASK_TOKEN
-    #         logits[:, :, 4096:] = float("-inf")
-
-    #     _, L, N = logits.size()
-    #     logits = logits / temperature
-    #     if t0 == 0:
-    #         prob = torch.softmax(logits, dim=-1)
-    #         next_x = torch.where(
-    #             xt==mask_token_index,
-    #             torch.multinomial(input=prob.view(L, N), num_samples=1).view(1, L),
-    #             xt
-    #         )
-    #         return next_x
-    #     else:
-    #         prob = torch.softmax(logits, dim=-1)
-
-    #     q_onestep_mat = self.absorbing_q_onestep_mat(
-    #         N=vocab_size,
-    #         mask_index=mask_token_index,
-    #         t=torch.LongTensor([t1]).to(device)
-    #     )    # 1, N, N
-    #     q_mat = self.absorbing_q_mat(
-    #         N=vocab_size,
-    #         mask_index=mask_token_index,
-    #         t=torch.LongTensor([t0]).to(device),
-    #     )    # 1, N, N
+        if strategy == 0:
+            gen_func = partial(self.sample_sequential, seq_first=True)
+        elif strategy == 1:
+            gen_func = partial(self.sample_sequential, seq_first=False)
+        elif strategy == 2:
+            gen_func = partial(self.sample_parallel, sync=True)
+        else:
+            gen_func = partial(self.sample_parallel, sync=False)
         
-    #     fact1 = self._at(xt, q_onestep_mat.transpose(1, 2))
-    #     fact2 = prob @ q_mat    
+        structure, sequence = gen_func(
+            structure=structure,
+            sequence=sequence,
+            denoise_func=denoise_func,
+            steps=steps,
+            device=device,
+            sequence_temp=sequence_temp,
+            structure_temp=structure_temp,
+            eta=eta
+        )
         
-    #     next_logits = torch.log(fact1*fact2+self.eps)        
-    #     next_prob = torch.softmax(next_logits, dim=-1)  # 1, L, N
-    #     next_x = torch.multinomial(input=next_prob.view(L, N), num_samples=1).view(1, L)   
-    #     return next_x
+        return structure.squeeze(0), sequence.squeeze(0)        
+
+    def sample_sequential(self, structure, sequence, denoise_func, seq_first, **kwargs):
+        if seq_first:
+            sequence = self._sample_sequence(
+                structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs)
+            structure = self._sample_structure(
+                structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs
+            )
+        else:
+            structure = self._sample_structure(
+                structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs
+            )
+            sequence = self._sample_sequence(
+                structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs)
+        return structure, sequence
+    
+    def sample_parallel(self, structure, sequence, denoise_func, sync, **kwargs):
+        dt = 1. / kwargs['steps']
+        t = torch.Tensor([[0]]).to(kwargs['device'])
+        desc = "Sample Both " + "Sync" if sync else "Async"
+        for idx in tqdm(range(kwargs['steps']), desc=desc):
+            struc_logits, seq_logits = \
+                denoise_func(structure=structure, sequence=sequence, t=t)
+            struc_probs = torch.softmax(struc_logits/kwargs['structure_temp'], dim=-1)
+            seq_probs = torch.softmax(seq_logits/kwargs['sequence_temp'], dim=-1)
+            
+            if sync:
+                structure, sequence, t = self._sample_next_both_sync(
+                    struc_probs=struc_probs, struc_xt=structure, seq_probs=seq_probs, seq_xt=sequence,
+                    dt=dt, t=t, eta=kwargs['eta'])
+            else:
+                structure, sequence, t = self._sample_next_both_async(
+                    struc_probs=struc_probs, struc_xt=structure, seq_probs=seq_probs, seq_xt=sequence,
+                    dt=dt, t=t, eta=kwargs['eta']
+                )
+                
+        return structure, sequence
+    
+    def _sample_structure(self, structure, sequence, denoise_func, **kwargs):
+        # generate structure
+        dt = 1. / kwargs['steps']
+        t = torch.Tensor([[0]]).to(kwargs['device'])
+        for idx in tqdm(range(kwargs['steps']), desc="Sample Structure"):
+            struc_logits, _ = \
+                denoise_func(structure=structure, sequence=sequence, t=t)
+            struc_probs = torch.softmax(struc_logits/kwargs['structure_temp'], dim=-1)
+            structure, t = self._sample_next_single(
+                probs=struc_probs, xt=structure, mask_token=C.STRUCTURE_MASK_TOKEN,
+                dt=dt, t=t, eta=kwargs['eta'])
+        return structure 
+
+    def _sample_sequence(self, structure, sequence, denoise_func, **kwargs):
+        dt = 1. / kwargs['steps']
+        t = torch.Tensor([[0]]).to(kwargs['device'])
+        for idx in tqdm(range(kwargs['steps']), desc="Sample Sequence"):
+            _, seq_logits = \
+                denoise_func(structure=structure, sequence=sequence, t=t)
+            seq_probs = torch.softmax(seq_logits/kwargs['sequence_temp'], dim=-1)
+            sequence, t = self._sample_next_single(
+                probs=seq_probs, xt=sequence, mask_token=C.SEQUENCE_MASK_TOKEN,
+                dt=dt, t=t, eta=kwargs['eta'])
+        return sequence
+
+    def _sample_next_single(self, probs, xt, mask_token, dt, t, eta):
+        """
+        probs: 1, L, D
+        xt: torch.LongTensor, 1, L
+        x1: torch.LongTensor, 1, L
+        mask_token: int
+        dt: float,
+        t: torch.FloatTensor, 1, 1
+        eta: float
+        """
+        B, L = xt.size()
+        device = xt.device
+
+        will_unmask = torch.rand(B, L, device=device) < (dt * (1+eta*t) / (1.-t+self.eps))
+        will_unmask = will_unmask & (xt == mask_token)
+        
+        will_mask = torch.rand(B, L, device=device) < (dt * eta)
+        will_mask = will_mask & (xt != mask_token)
+        
+        x1 = Categorical(probs).sample()
+        next_xt = torch.where(will_unmask, x1, xt)
+        
+        next_t = t + dt
+        if next_t < 1.0:
+            next_xt[will_mask] = mask_token
+        return next_xt, next_t
+      
+    def _sample_next_both_sync(self, struc_probs, struc_xt, seq_probs, seq_xt, dt, t, eta):
+        B, L = struc_xt.size()
+        device = struc_xt.device
+        
+        assert not ((struc_xt == C.STRUCTURE_MASK_TOKEN) ^ (seq_xt == C.SEQUENCE_MASK_TOKEN)).any()
+        mask = struc_xt == C.STRUCTURE_MASK_TOKEN
+        
+        will_unmask = torch.rand(B, L, device=device) < (dt * (1+eta*t) / (1.-t+self.eps))
+        will_unmask = will_unmask & mask
+        
+        will_mask = torch.rand(B, L, device=device) < (dt * eta)
+        will_mask = will_mask & ~mask
+        
+        struc_x1 = Categorical(struc_probs).sample()
+        seq_x1 = Categorical(seq_probs).sample()
+        next_struc_xt = torch.where(will_unmask, struc_x1, struc_xt)
+        next_seq_xt = torch.where(will_unmask, seq_x1, seq_xt)
+        
+        next_t = t + dt
+        if next_t < 1.0:
+            next_struc_xt[will_mask] = C.STRUCTURE_MASK_TOKEN
+            next_seq_xt[will_mask]= C.SEQUENCE_MASK_TOKEN
+        
+        return next_struc_xt, next_seq_xt, next_t
+    
+    def _sample_next_both_async(self, struc_probs, struc_xt, seq_probs, seq_xt, dt, t, eta):
+        next_struc_xt, _ = self._sample_next_single(
+            probs=struc_probs, xt=struc_xt, mask_token=C.STRUCTURE_MASK_TOKEN,
+            dt=dt, t=t, eta=eta)
+        next_seq_xt, next_t = self._sample_next_single(
+            probs=seq_probs, xt=seq_xt, mask_token=C.SEQUENCE_MASK_TOKEN,
+            dt=dt, t=t, eta=eta
+        )
+        return next_struc_xt, next_seq_xt, next_t
 
 
 # if __name__ == "__main__":
