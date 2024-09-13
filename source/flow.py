@@ -119,6 +119,8 @@ class Flow(nn.Module):
             purity=purity,
         )
 
+
+
         return structure.squeeze(0), sequence.squeeze(0)        
 
     def sample_sequential(self, structure, sequence, denoise_func, seq_first, **kwargs):
@@ -203,8 +205,6 @@ class Flow(nn.Module):
 
         will_unmask = will_unmask & (xt == mask_token)
         will_mask = will_mask & (xt != mask_token)
-
-        print(step, torch.sum(xt!=mask_token), torch.sum(will_unmask), torch.sum(will_mask))
         
         x1 = Categorical(probs).sample()
         next_xt = torch.where(will_unmask, x1, xt)

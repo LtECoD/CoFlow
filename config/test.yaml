@@ -21,6 +21,8 @@ model:
   # n_layers: 48
   # n_heads: 24
   eps: 1.e-10
+  simplified_encoder: True
+  train_async: True
 
 train:
   seed: 42
