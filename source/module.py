@@ -30,6 +30,19 @@ class FourierFeaturization(nn.Module):
         tx = self.proj(h)[:, None, :]       # B, 1, D/2
         return tx
 
+class CoFlowEncodeInputs_simplified(nn.Module):
+    def __init__(self, d_model):
+        super().__init__()
+        # Sequence
+        self.sequence_embed = nn.Embedding(64, d_model)
+        # Structure
+        self.structure_tokens_embed = nn.Embedding(4096 + 5, d_model)
+    
+    def forward(self, sequence_tokens, structure_tokens):
+        sequence_embed = self.sequence_embed(sequence_tokens)
+        structure_embed = self.structure_tokens_embed(structure_tokens)
+        return sequence_embed + structure_embed
+        
 
 class CoFlowEncodeInputs(EncodeInputs):
     def __init__(self, d_model):

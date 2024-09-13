@@ -9,14 +9,16 @@ data:
   max_len: 512
 
 model:
-  structure_track: true
-  sequence_track: true
+  structure_track: True
+  sequence_track: True
+  simplified_encoder: True
   d_time: 512
   d_model: 1024
-  n_layers: 18
+  n_layers: 24
   n_heads: 16
   finetune_esm: False
   eps: 1.e-10
+  train_async: True
 
 train:
   seed: 42

@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,10 +10,11 @@ import esm.utils.constants.esm3 as C
 
 
 class Flow(nn.Module):
-    def __init__(self, eps):
+    def __init__(self, train_async, eps):
         super(Flow, self).__init__()
         self.struc_vocab_size = len(C.VQVAE_SPECIAL_TOKENS)+C.VQVAE_CODEBOOK_SIZE
         self.seq_vocab_size = len(C.SEQUENCE_VOCAB)
+        self.train_async = train_async
         self.eps = eps
 
     def forward(self, structure, sequence, pad_mask=None, t=None):
@@ -21,16 +23,24 @@ class Flow(nn.Module):
         if t is None:
             t = torch.rand(size=(B,), device=device)        # B
 
-        mask_index = torch.rand(B, L).to(device) < (1. - t[:, None])   # B, L
-        if pad_mask is not None:
-            mask_index = mask_index & pad_mask              # only mask non-pad tokens
+        if self.train_async:
+            seq_mask_index = torch.rand(B, L).to(device) < (1. - t[:, None])
+            struc_mask_index = torch.rand(B, L).to(device) < (1. - t[:, None])
+            if pad_mask is not None:
+                seq_mask_index = seq_mask_index & pad_mask
+                struc_mask_index = struc_mask_index & pad_mask
+        else:
+            mask_index = torch.rand(B, L).to(device) < (1. - t[:, None])   # B, L
+            if pad_mask is not None:
+                mask_index = mask_index & pad_mask              # only mask non-pad tokens
+            seq_mask_index = struc_mask_index = mask_index
         
         # mask
         noised_structure = torch.where(
-            mask_index, C.STRUCTURE_MASK_TOKEN, structure
+            struc_mask_index, C.STRUCTURE_MASK_TOKEN, structure
         ) if structure is not None else None
         noised_seq = torch.where(
-            mask_index, C.SEQUENCE_MASK_TOKEN, sequence,
+            seq_mask_index, C.SEQUENCE_MASK_TOKEN, sequence,
         ) if sequence is not None else None
 
         return noised_structure, noised_seq, t
@@ -61,6 +71,7 @@ class Flow(nn.Module):
         length=None,
         steps:int=100,
         eta: float=0.,
+        purity: bool=False,
         structure=None,
         sequence=None,
         sequence_temp=1.,
@@ -104,7 +115,8 @@ class Flow(nn.Module):
             device=device,
             sequence_temp=sequence_temp,
             structure_temp=structure_temp,
-            eta=eta
+            eta=eta,
+            purity=purity,
         )
 
         return structure.squeeze(0), sequence.squeeze(0)        
@@ -136,13 +148,11 @@ class Flow(nn.Module):
             if sync:
                 structure, sequence = self._sample_next_both_sync(
                     struc_probs=struc_probs, struc_xt=structure, seq_probs=seq_probs, seq_xt=sequence,
-                    N=kwargs["steps"], step=idx, eta=kwargs['eta'])
+                    N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'])
             else:
                 structure, sequence = self._sample_next_both_async(
                     struc_probs=struc_probs, struc_xt=structure, seq_probs=seq_probs, seq_xt=sequence,
-                    N=kwargs["steps"], step=idx, eta=kwargs['eta']
-                )
-
+                    N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'])        
         return structure, sequence
     
     def _sample_structure(self, structure, sequence, denoise_func, **kwargs):
@@ -154,7 +164,7 @@ class Flow(nn.Module):
             struc_probs = torch.softmax(struc_logits/kwargs['structure_temp'], dim=-1)
             structure = self._sample_next_single(
                 probs=struc_probs, xt=structure, mask_token=C.STRUCTURE_MASK_TOKEN,
-                N=kwargs["steps"], step=idx, eta=kwargs['eta'])
+                N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'])
         return structure 
 
     def _sample_sequence(self, structure, sequence, denoise_func, **kwargs):
@@ -165,10 +175,10 @@ class Flow(nn.Module):
             seq_probs = torch.softmax(seq_logits/kwargs['sequence_temp'], dim=-1)
             sequence = self._sample_next_single(
                 probs=seq_probs, xt=sequence, mask_token=C.SEQUENCE_MASK_TOKEN,
-                N=kwargs["steps"], step=idx, eta=kwargs['eta'])
+                N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'])
         return sequence
 
-    def _sample_next_single(self, probs, xt, mask_token, N, step, eta):
+    def _sample_next_single(self, probs, xt, mask_token, N, step, eta, purity=False):
         """
         probs: 1, L, D
         xt: torch.LongTensor, 1, L
@@ -182,11 +192,19 @@ class Flow(nn.Module):
         dt = 1. / N
         t = step / N
 
-        will_unmask = torch.rand(B, L, device=device) < (dt * (1+eta*t) / (1.-t))
-        will_unmask = will_unmask & (xt == mask_token)
-        
+        if purity:
+            will_unmask_num = math.ceil(L * dt * (1+eta*t) / (1.-t))
+            will_unmask_num = min(L, will_unmask_num)
+            will_unmask = build_single_mask_from_entropy(
+                probs, k=will_unmask_num, mask=(xt==mask_token), largest=False)
+        else:
+            will_unmask = torch.rand(B, L, device=device) < (dt * (1+eta*t) / (1.-t))
         will_mask = torch.rand(B, L, device=device) < (dt * eta)
+
+        will_unmask = will_unmask & (xt == mask_token)
         will_mask = will_mask & (xt != mask_token)
+
+        print(step, torch.sum(xt!=mask_token), torch.sum(will_unmask), torch.sum(will_mask))
         
         x1 = Categorical(probs).sample()
         next_xt = torch.where(will_unmask, x1, xt)
@@ -195,7 +213,7 @@ class Flow(nn.Module):
             next_xt[will_mask] = mask_token
         return next_xt
       
-    def _sample_next_both_sync(self, struc_probs, struc_xt, seq_probs, seq_xt, N, step, eta):
+    def _sample_next_both_sync(self, struc_probs, struc_xt, seq_probs, seq_xt, N, step, eta, purity):
         B, L = struc_xt.size()
         device = struc_xt.device
         
@@ -205,10 +223,17 @@ class Flow(nn.Module):
         assert not ((struc_xt == C.STRUCTURE_MASK_TOKEN) ^ (seq_xt == C.SEQUENCE_MASK_TOKEN)).any()
         mask = struc_xt == C.STRUCTURE_MASK_TOKEN
         
-        will_unmask = torch.rand(B, L, device=device) < (dt * (1+eta*t) / (1.-t))
-        will_unmask = will_unmask & mask
-        
+        if purity:
+            will_unmask_num = math.ceil(L * dt * (1+eta*t) / (1.-t))
+            will_unmask_num = min(L, will_unmask_num)
+            will_unmask = build_both_mask_from_entropy(
+                struc_probs=struc_probs, seq_probs=seq_probs, k=will_unmask_num,
+                mask=mask, largest=False)
+        else:
+            will_unmask = torch.rand(B, L, device=device) < (dt * (1+eta*t) / (1.-t))            
         will_mask = torch.rand(B, L, device=device) < (dt * eta)
+            
+        will_unmask = will_unmask & mask
         will_mask = will_mask & ~mask
         
         struc_x1 = Categorical(struc_probs).sample()
@@ -222,15 +247,49 @@ class Flow(nn.Module):
         
         return next_struc_xt, next_seq_xt
 
-    def _sample_next_both_async(self, struc_probs, struc_xt, seq_probs, seq_xt, N, step, eta):
+    def _sample_next_both_async(self, struc_probs, struc_xt, seq_probs, seq_xt, N, step, eta, purity):
         next_struc_xt = self._sample_next_single(
             probs=struc_probs, xt=struc_xt, mask_token=C.STRUCTURE_MASK_TOKEN,
-            N=N, step=step, eta=eta)
+            N=N, step=step, eta=eta, purity=purity)
         next_seq_xt = self._sample_next_single(
             probs=seq_probs, xt=seq_xt, mask_token=C.SEQUENCE_MASK_TOKEN,
-            N=N, step=step, eta=eta
+            N=N, step=step, eta=eta, purity=purity
         )
         return next_struc_xt, next_seq_xt
+
+
+def build_both_mask_from_entropy(struc_probs, seq_probs, k, mask, eps=1e-10, largest=False):
+    B, L, _ = seq_probs.size()
+    device = struc_probs.device
+    
+    seq_entropy = torch.sum(
+        -1. * seq_probs * torch.log(seq_probs+eps), dim=-1)
+    struc_entropy = torch.sum(
+        -1 * struc_probs * torch.log(struc_probs+eps), dim=-1)
+    entropy = seq_entropy + struc_entropy
+    entropy[~mask] = float("-inf") if largest else float("inf")
+    
+    values, indices = torch.topk(entropy, dim=-1, k=k, largest=largest) # B, K
+    topk_mask = torch.zeros_like(entropy).bool()   # B, L
+    topk_mask[torch.arange(B).to(device)[:, None], indices] = True
+    return topk_mask
+
+
+def build_single_mask_from_entropy(probs, k, mask, eps=1e-10, largest=False):
+    """
+    probs: B, L, D
+    """
+    B, L, _ = probs.size()
+    device = probs.device
+    
+    log_probs = torch.log(probs+eps)
+    entropy = torch.sum(-1. * probs * log_probs, dim=-1)
+    entropy[~mask] = float("-inf") if largest else float("inf")
+
+    values, indices = torch.topk(entropy, dim=-1, k=k, largest=largest) # B, K
+    topk_mask = torch.zeros_like(entropy).bool()   # B, L
+    topk_mask[torch.arange(B).to(device)[:, None], indices] = True
+    return topk_mask
 
 
 # if __name__ == "__main__":

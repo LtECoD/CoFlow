@@ -6,6 +6,7 @@ from transformers import PretrainedConfig, PreTrainedModel
 import esm.utils.constants.esm3 as C
 
 from module import (
+    CoFlowEncodeInputs_simplified,
     CoFlowEncodeInputs,
     CoFlowTransformerStack,
     CoFlowOutputHeads,
@@ -27,8 +28,11 @@ class CoFlowModel(PreTrainedModel):
 
     def __init__(self, conf):        
         super(CoFlowModel, self).__init__(conf)
+        
+        encoder_class = CoFlowEncodeInputs_simplified \
+            if getattr(conf, "simplified_encoder", False) else CoFlowEncodeInputs
 
-        self.encoder = CoFlowEncodeInputs(d_model=conf.d_model)
+        self.encoder = encoder_class(d_model=conf.d_model)
         self.transformer = CoFlowTransformerStack(
             d_model=conf.d_model,
             d_time=conf.d_time,
@@ -41,7 +45,7 @@ class CoFlowModel(PreTrainedModel):
             sequence_track=conf.sequence_track,
         )
         
-        self.flow = Flow(eps=conf.eps)
+        self.flow = Flow(train_async=getattr(conf, "train_async", False), eps=conf.eps)
         self.sample = lambda **kwargs: self.flow.sample(
             denoise_func=self.denoise, **kwargs)
 
