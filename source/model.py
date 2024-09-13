@@ -1,4 +1,5 @@
 import torch
+from functools import partial
 from dataclasses import dataclass
 from transformers.modeling_outputs import ModelOutput
 from transformers import PretrainedConfig, PreTrainedModel
@@ -12,6 +13,7 @@ from module import (
     CoFlowOutputHeads,
 )
 from flow import Flow
+from utils import build_attention_mask
 
 
 class CoFlowConfig(PretrainedConfig):
@@ -39,36 +41,29 @@ class CoFlowModel(PreTrainedModel):
             n_heads=conf.n_heads,
             n_layers=conf.n_layers,
         )
-        self.output_heads = CoFlowOutputHeads(
-            d_model=conf.d_model,
-            structure_track=conf.structure_track,
-            sequence_track=conf.sequence_track,
-        )
-        
-        self.flow = Flow(train_async=getattr(conf, "train_async", False), eps=conf.eps)
-        self.sample = lambda **kwargs: self.flow.sample(
-            denoise_func=self.denoise, **kwargs)
+        self.output_heads = CoFlowOutputHeads(d_model=conf.d_model)
 
-    def denoise(self, structure, sequence, t, mask=None):
-        B, L = structure.size()
-        device = structure.device
-        if mask is None:
-            mask = torch.ones(B, L).long().to(device)
-        
+        self.flow = Flow(train_async=getattr(conf, "train_async", False), eps=conf.eps)
+        self.sample = partial(self.flow.sample, denoise_func=self.denoise)
+
+    def denoise(self, structure, sequence, t):
+        attn_mask = build_attention_mask(
+            structure=structure,
+            sequence=sequence,
+            directional=getattr(self.config, "directional", False),
+        )
+
         x = self.encoder(
             structure_tokens=structure,
             sequence_tokens=sequence,
         )
         x, embedding = self.transformer(
-            x=x, t=t, sequence_id=mask
+            x=x, t=t, attn_mask=attn_mask
         )
         structure_logits, sequence_logits = self.output_heads(x)
         return structure_logits, sequence_logits
 
-    def forward(self, structure, sequence, name, return_loss=True):
-        B, L = structure.size()
-        mask = structure != C.STRUCTURE_PAD_TOKEN
-        
+    def forward(self, structure, sequence, name, return_loss=True):    
         noised_structure, noised_sequence, t = self.flow(
             structure=structure,
             sequence=sequence,
@@ -77,38 +72,20 @@ class CoFlowModel(PreTrainedModel):
             structure=noised_structure,
             sequence=noised_sequence,
             t=t[:, None],
-            mask=mask.long(),
         )
 
         # loss
-        if self.config.structure_track:
-            struc_mask = (noised_structure == C.STRUCTURE_MASK_TOKEN) & mask
-            struc_loss, struc_acc = self.flow.loss(
-                pred_x0_logits=structure_logits,
-                x_0=structure,
-                mask=struc_mask.long(),
-            )
-        else:
-            struc_loss = struc_acc = 0.
-
-        if self.config.sequence_track:
-            seq_mask = (noised_sequence == C.SEQUENCE_MASK_TOKEN) & mask
-            seq_loss, seq_acc = self.flow.loss(
-                pred_x0_logits=sequence_logits,
-                x_0=sequence,
-                mask=seq_mask.long(),
-            )
-        else:
-            seq_loss = seq_acc = 0.
-        
-        if self.config.structure_track and self.config.sequence_track:
-            loss = struc_loss + seq_loss
-        elif self.config.structure_track:
-            loss = struc_loss
-        elif self.config.sequence_track:
-            loss = seq_loss
-        else:
-            raise ValueError
+        struc_loss, struc_acc = self.flow.loss(
+            pred_x0_logits=structure_logits,
+            x_0=structure,
+            mask=noised_structure==C.STRUCTURE_MASK_TOKEN,
+        )
+        seq_loss, seq_acc = self.flow.loss(
+            pred_x0_logits=sequence_logits,
+            x_0=sequence,
+            mask=noised_sequence==C.SEQUENCE_MASK_TOKEN,
+        )
+        loss = struc_loss + seq_loss
 
         return CoFlowOutput(
             loss=loss,
@@ -138,16 +115,39 @@ class CoFlowOutput(ModelOutput):
     
 #     model = CoFlowModel(
 #         conf=CoFlowConfig(**OmegaConf.create({
-#             "sequence_track": True,
-#             "structure_track": True,
 #             "d_time": 128,
 #             "d_model": 256,
 #             "n_layers": 8,
 #             "n_heads": 4,
-#             "eta": 5,
-#             "eps": 1.e-10
+#             "eps": 1.e-10,
+#             "train_async": True,
+#             "simplified_encoder": True,
+#             "directional": True
 #         })),
 #     )
+    
+#     def test_build_attention_mask():
+#         structure = torch.randint(0, 4096, size=(2, 5))
+#         sequence = torch.randint(4, 29, size=(2, 5))
+#         structure[0, 3:] = C.STRUCTURE_PAD_TOKEN
+#         sequence[0, 3:] = C.SEQUENCE_PAD_TOKEN
+        
+#         print(sequence)
+#         print(structure)
+        
+#         structure, sequence, t = model.flow(structure=structure, sequence=sequence, t=torch.Tensor([0.5, 0]))
+#         print()
+#         print(sequence)
+#         print(structure)
+#         print(t)
+#         print()
+        
+#         mask = build_attention_mask(structure=structure, sequence=sequence, directional='True')
+#         print(mask)
+    
+#     test_build_attention_mask()
+    
+    
 #     optim = Adam(model.parameters(), lr=0.0001)
 #     dataset = ProDataset(
 #         OmegaConf.create({

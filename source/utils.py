@@ -81,3 +81,34 @@ def to_protein(
     )
 
     return protein
+
+
+def build_attention_mask(structure, sequence, directional):
+    """
+    To make all tokens seen only non-mask tokens
+    return:
+        mask: B, L, L
+    """    
+    pad_mask = structure != C.STRUCTURE_PAD_TOKEN
+    assert not (pad_mask ^ (sequence != C.SEQUENCE_PAD_TOKEN)).any()
+    
+    if directional:
+        B, L = structure.size()
+        device = structure.device
+        
+        attn_mask = torch.zeros(B, L, L, dtype=torch.bool).to(device)
+
+        has_info = (structure != C.STRUCTURE_MASK_TOKEN) | \
+            (sequence != C.SEQUENCE_MASK_TOKEN)                     # B, L
+        has_info = has_info & pad_mask                              # B, L
+        attn_mask[has_info, :] = True
+        attn_mask = attn_mask.transpose(1, 2)
+        
+        # to make sure each token attend to itself
+        diag_mask = torch.eye(L, dtype=torch.bool, device=device)
+        diag_mask = diag_mask[None, :, :].repeat(B, 1, 1)           # B, L, L
+        attn_mask = attn_mask | diag_mask
+    else:
+        attn_mask = pad_mask[:, :, None] == pad_mask[:, None, :]    # B, L, L
+        
+    return attn_mask

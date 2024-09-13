@@ -17,11 +17,13 @@ class Flow(nn.Module):
         self.train_async = train_async
         self.eps = eps
 
-    def forward(self, structure, sequence, pad_mask=None, t=None):
+    def forward(self, structure, sequence, t=None):
         device = structure.device
         B, L = structure.size()
         if t is None:
             t = torch.rand(size=(B,), device=device)        # B
+        pad_mask = structure != C.STRUCTURE_PAD_TOKEN
+        assert not (pad_mask ^ (sequence != C.SEQUENCE_PAD_TOKEN)).any()
 
         if self.train_async:
             seq_mask_index = torch.rand(B, L).to(device) < (1. - t[:, None])
@@ -37,11 +39,9 @@ class Flow(nn.Module):
         
         # mask
         noised_structure = torch.where(
-            struc_mask_index, C.STRUCTURE_MASK_TOKEN, structure
-        ) if structure is not None else None
+            struc_mask_index, C.STRUCTURE_MASK_TOKEN, structure)
         noised_seq = torch.where(
-            seq_mask_index, C.SEQUENCE_MASK_TOKEN, sequence,
-        ) if sequence is not None else None
+            seq_mask_index, C.SEQUENCE_MASK_TOKEN, sequence)
 
         return noised_structure, noised_seq, t
     
@@ -53,8 +53,6 @@ class Flow(nn.Module):
             reduction="none",
         )
         ce_loss = ce_loss.view(B, L)
-        if mask is None:
-            mask = torch.ones(B, L).to(x_0.device)        
         loss = torch.sum(ce_loss * mask) / (torch.sum(mask) + self.eps)
         
         # acc
@@ -118,8 +116,6 @@ class Flow(nn.Module):
             eta=eta,
             purity=purity,
         )
-
-
 
         return structure.squeeze(0), sequence.squeeze(0)        
 
@@ -259,6 +255,9 @@ class Flow(nn.Module):
 
 
 def build_both_mask_from_entropy(struc_probs, seq_probs, k, mask, eps=1e-10, largest=False):
+    """
+    For purity unmask
+    """
     B, L, _ = seq_probs.size()
     device = struc_probs.device
     
@@ -277,6 +276,7 @@ def build_both_mask_from_entropy(struc_probs, seq_probs, k, mask, eps=1e-10, lar
 
 def build_single_mask_from_entropy(probs, k, mask, eps=1e-10, largest=False):
     """
+    For purity unmask
     probs: B, L, D
     """
     B, L, _ = probs.size()

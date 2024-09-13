@@ -9,15 +9,14 @@ data:
   max_len: 512
 
 model:
-  structure_track: true
-  sequence_track: true
   finetune_esm: true
   d_time: 512
   d_model: 1536
   n_layers: 48
   n_heads: 24
-  eps: 1.e-10
+  directional: True
   simplified_encoder: True
+  eps: 1.e-10
   train_async: True
 
 train:
@@ -32,7 +31,7 @@ train:
   gradient_accumulation_steps: 2
   max_steps: 1000000
   save_total_limit: 10
-  output_dir: "./save/finetune_async_simp"
+  output_dir: "./save/finetune_async_simp_dir"
   overwrite_output_dir: True
   bf16: True
   fp16: False

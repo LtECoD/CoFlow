@@ -1,15 +1,88 @@
 import math
 import torch
+import einops
+import functools
 import torch.nn as nn
+import torch.nn.functional as F
 
 import esm.utils.constants.esm3 as C
 from esm.models.esm3 import EncodeInputs
 from esm.layers.regression_head import RegressionHead
 from esm.layers.blocks import (
-    MultiHeadAttention,
     swiglu_ln_ffn,
     gelu_ln_ffn,
 )
+from esm.layers.rotary import RotaryEmbedding
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        bias: bool = False,
+        qk_layernorm: bool = True,
+    ):
+        super().__init__()
+
+        self.d_model = d_model
+        self.n_heads = n_heads
+
+        self.d_head = self.d_model // self.n_heads
+        self.layernorm_qkv = nn.Sequential(
+            nn.LayerNorm(d_model), nn.Linear(d_model, d_model * 3, bias=bias)
+        )
+        self.out_proj = nn.Linear(d_model, d_model, bias=bias)
+
+        if qk_layernorm:
+            self.q_ln = nn.LayerNorm(d_model, bias=bias)
+            self.k_ln = nn.LayerNorm(d_model, bias=bias)
+        else:
+            self.q_ln = nn.Identity()
+            self.k_ln = nn.Identity()
+
+        self.rotary = RotaryEmbedding(d_model // n_heads)
+
+    def _apply_rotary(self, q: torch.Tensor, k: torch.Tensor):
+        q = q.unflatten(-1, (self.n_heads, self.d_head))
+        k = k.unflatten(-1, (self.n_heads, self.d_head))
+        q, k = self.rotary(q, k)
+        q = q.flatten(-2, -1)
+        k = k.flatten(-2, -1)
+        return q, k
+
+    def forward(self, x, attn_mask):
+        qkv_BLD3 = self.layernorm_qkv(x)
+        query_BLD, key_BLD, value_BLD = torch.chunk(qkv_BLD3, 3, dim=-1)
+        query_BLD, key_BLD = self.q_ln(query_BLD), self.k_ln(key_BLD)
+        query_BLD, key_BLD = self._apply_rotary(query_BLD, key_BLD)
+
+        n_heads = self.n_heads
+        reshaper = functools.partial(
+            einops.rearrange, pattern="b s (h d) -> b h s d", h=n_heads
+        )
+
+        query_BHLD, key_BHLD, value_BHLD = map(
+            reshaper, (query_BLD, key_BLD, value_BLD)
+        )
+
+        if attn_mask is not None:
+            # # Where True, enable participation in attention.
+            # mask_BLL = seq_id.unsqueeze(-1) == seq_id.unsqueeze(-2)
+            # mask_BHLL = mask_BLL.unsqueeze(1)
+            mask_BHLL = attn_mask.unsqueeze(1)
+
+            context_BHLD = F.scaled_dot_product_attention(
+                query_BHLD, key_BHLD, value_BHLD, mask_BHLL
+            )
+        else:
+            # Shortcut, if we don't use attention biases then torch
+            # will autoselect flashattention as the implementation
+            context_BHLD = F.scaled_dot_product_attention(
+                query_BHLD, key_BHLD, value_BHLD
+            )
+        context_BLD = einops.rearrange(context_BHLD, "b h s d -> b s (h d)")
+        return self.out_proj(context_BLD)
 
 
 class FourierFeaturization(nn.Module):
@@ -29,6 +102,7 @@ class FourierFeaturization(nn.Module):
         h = torch.cat([h.cos(), h.sin()], dim=-1)
         tx = self.proj(h)[:, None, :]       # B, 1, D/2
         return tx
+
 
 class CoFlowEncodeInputs_simplified(nn.Module):
     def __init__(self, d_model):
@@ -79,25 +153,22 @@ class CoFlowEncodeInputs(EncodeInputs):
 
 
 class CoFlowOutputHeads(nn.Module):
-    def __init__(self, d_model, sequence_track, structure_track):
+    def __init__(self, d_model):
         super().__init__()
-        self.structure_head = RegressionHead(d_model, 4096) if structure_track else None
-        self.sequence_head = RegressionHead(d_model, 64) if sequence_track else None
+        self.structure_head = RegressionHead(d_model, 4096)
+        self.sequence_head = RegressionHead(d_model, 64)
         self.struc_fill_value = -1.e10
 
     def forward(self, x: torch.Tensor):
-        structure_logits = self.structure_head(x) if self.structure_head else None
-        sequence_logits = self.sequence_head(x) if self.sequence_head else None
+        structure_logits = self.structure_head(x)
+        B, L, _ = structure_logits.size()
+        device = structure_logits.device
+        struc_logits_padding = torch.full(
+            (B, L, 5), fill_value=self.struc_fill_value).to(device)
+        structure_logits = torch.cat((structure_logits, struc_logits_padding), dim=-1)
         
-        if structure_logits is not None:
-            B, L, _ = structure_logits.size()
-            device = structure_logits.device
-            struc_logits_padding = torch.full(
-                (B, L, 5), fill_value=self.struc_fill_value).to(device)
-            structure_logits = torch.cat((structure_logits, struc_logits_padding), dim=-1)
-        
-        if sequence_logits is not None:
-            sequence_logits = sequence_logits[:, :, :33]
+        sequence_logits = self.sequence_head(x)
+        sequence_logits = sequence_logits[:, :, :33]
         
         return structure_logits, sequence_logits
 
@@ -134,13 +205,13 @@ class CoFlowTransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         t: torch.Tensor,
-        sequence_id: torch.Tensor,
+        attn_mask: torch.BoolTensor,
     ) -> torch.Tensor:
         if self.time_embed is not None:
             tx = self.time_embed(t) 
             x = x + tx
         
-        r1 = self.attn(x, sequence_id)
+        r1 = self.attn(x, attn_mask)
         x = x + r1 / self.scaling_factor
 
         r3 = self.ffn(x) / self.scaling_factor
@@ -186,9 +257,9 @@ class CoFlowTransformerStack(nn.Module):
         self,
         x: torch.Tensor,
         t: torch.Tensor,
-        sequence_id: torch.Tensor | None = None,
+        attn_mask: torch.BoolTensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         for block in self.blocks:
-            x = block(x, t=t, sequence_id=sequence_id)
+            x = block(x, t=t, attn_mask=attn_mask)
         return self.norm(x), x
 

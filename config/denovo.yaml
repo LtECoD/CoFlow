@@ -9,14 +9,13 @@ data:
   max_len: 512
 
 model:
-  structure_track: True
-  sequence_track: True
-  simplified_encoder: True
+  finetune_esm: False
   d_time: 512
   d_model: 1024
   n_layers: 24
   n_heads: 16
-  finetune_esm: False
+  directional: True
+  simplified_encoder: True
   eps: 1.e-10
   train_async: True
 
@@ -30,7 +29,7 @@ train:
   lr_scheduler_type: "constant"
   weight_decay: 0.01
   warmup_steps: 1000
-  per_device_train_batch_size: 24
+  per_device_train_batch_size: 20
   gradient_accumulation_steps: 2
   max_steps: 1000000
   save_total_limit: 10

@@ -9,12 +9,11 @@ data:
   max_len: 512
 
 model:
-  structure_track: true
-  sequence_track: true
   d_time: 128
   d_model: 256
   n_layers: 4
   n_heads: 4
+  directional: True
   # finetune_esm: true
   # d_time: 512
   # d_model: 1536
@@ -35,7 +34,6 @@ train:
   weight_decay: 0.01
   per_device_train_batch_size: 4
   gradient_accumulation_steps: 1
-
   max_steps: 2000
   save_total_limit: 10
   output_dir: "./save/test"
