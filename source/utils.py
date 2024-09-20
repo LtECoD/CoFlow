@@ -80,7 +80,7 @@ def to_protein(
         ptm=ptm,
     )
 
-    return protein
+    return protein, float(ptm), float(plddt.mean())
 
 
 def build_attention_mask(structure, sequence, directional):

@@ -14,8 +14,8 @@ model:
   d_model: 1024
   n_layers: 24
   n_heads: 16
-  directional: True
-  simplified_encoder: True
+  directional: False
+  simplified_encoder: False
   eps: 1.e-10
   train_async: True
 

@@ -14,8 +14,8 @@ model:
   d_model: 1536
   n_layers: 48
   n_heads: 24
-  directional: True
-  simplified_encoder: True
+  directional: False
+  simplified_encoder: False
   eps: 1.e-10
   train_async: True
 
@@ -31,7 +31,7 @@ train:
   gradient_accumulation_steps: 2
   max_steps: 1000000
   save_total_limit: 10
-  output_dir: "./save/finetune_async_simp_dir"
+  output_dir: "./save/finetune_async"
   overwrite_output_dir: True
   bf16: True
   fp16: False
