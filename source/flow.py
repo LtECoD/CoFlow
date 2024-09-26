@@ -95,6 +95,8 @@ class Flow(nn.Module):
         else:
             assert structure.size() == sequence.size()    
         structure, sequence = structure.to(device), sequence.to(device)
+        structure_mask = structure == C.STRUCTURE_MASK_TOKEN
+        sequence_mask = sequence == C.SEQUENCE_MASK_TOKEN
         
         if strategy == 0:
             gen_func = partial(self.sample_sequential, seq_first=True)
@@ -119,25 +121,40 @@ class Flow(nn.Module):
             purity=purity,
         )
 
-        return structure.squeeze(0), sequence.squeeze(0)        
+        # estimate probs
+        struc_logits, seq_logits = \
+            denoise_func(structure=structure, sequence=sequence, t=torch.Tensor([[1]]).to(device))
+        struc_probs = torch.softmax(struc_logits, dim=-1)
+        seq_probs = torch.softmax(seq_logits, dim=-1)
+        
+        
+        struc_probs[~structure_mask, :] = \
+            F.one_hot(structure, num_classes=struc_probs.size(-1))[~structure_mask, :].float()
+        seq_probs[~sequence_mask, :] = \
+            F.one_hot(sequence, num_classes=seq_probs.size(-1))[~sequence_mask, :].float()
+
+        return {
+            "sequence": sequence.squeeze(0),
+            "structure": structure.squeeze(0),
+            "sequence_prob": seq_probs.squeeze(0),
+            "structure_prob": struc_probs.squeeze(0),
+        }
 
     def sample_sequential(self, structure, sequence, denoise_func, seq_first, **kwargs):
         if seq_first:
             sequence = self._sample_sequence(
                 structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs)
             structure = self._sample_structure(
-                structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs
-            )
+                structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs)
         else:
             structure = self._sample_structure(
-                structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs
-            )
+                structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs)
             sequence = self._sample_sequence(
                 structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs)
         return structure, sequence
 
     def sample_parallel(self, structure, sequence, denoise_func, joint, **kwargs):        
-        desc = "Sample Parallel " + ("Joint" if joint else "Separate")
+        desc = "Sample Parallel " + ("Joint" if joint else "Peroidical")
         for idx in tqdm(range(kwargs['steps']), desc=desc):
             t = torch.Tensor([[idx/kwargs['steps']]]).to(kwargs['device'])
             

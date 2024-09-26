@@ -84,15 +84,18 @@ def main():
         f.write(OmegaConf.to_yaml(args))
     checkpoint = train_args.pop('checkpoint', None)
 
-    model = CoFlowModel(CoFlowConfig(**model_args))
-    # load esm model
-    if getattr(model_args, "finetune_esm", False):
-        state_dict = torch.load(
-            data_root() / "data/weights/esm3_sm_open_v1.pth")
-        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False) 
-        if rank == 0:
-            print("Missing Keys: ", missing_keys)
-            print("Unexpected Keys: ", unexpected_keys)
+    if getattr(model_args, "pretrained", None) is not None:
+        model = CoFlowModel.from_pretrained(model_args.pretrained)
+    else:
+        model = CoFlowModel(CoFlowConfig(**model_args))
+        # load esm model
+        if getattr(model_args, "finetune_esm", False):
+            state_dict = torch.load(
+                data_root() / "data/weights/esm3_sm_open_v1.pth")
+            missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False) 
+            if rank == 0:
+                print("Missing Keys: ", missing_keys)
+                print("Unexpected Keys: ", unexpected_keys)
     
     trainset, validset = build_data(data_args)
     trainer = build_trainer(
