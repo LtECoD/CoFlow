@@ -1,0 +1,36 @@
+data:
+  dir: "./data"
+  train_prefix: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  valid_prefix: [10]
+  train_num: 16271519
+  valid_num: 164318
+  shuffle: True
+  min_len: 40
+  max_len: 512
+
+model:
+  pretrained: "./save/finetune_async/checkpoint-500000"
+
+train:
+  seed: 42
+  do_train: true
+  optim: "adamw_torch"
+  adam_beta1: 0.9
+  adam_beta2: 0.98
+  learning_rate: 1.e-5
+  lr_scheduler_type: "constant"
+  per_device_train_batch_size: 12
+  gradient_accumulation_steps: 2
+  max_steps: 1000000
+  save_total_limit: 10
+  output_dir: "./save/finetune_async_continue"
+  overwrite_output_dir: True
+  bf16: True
+  fp16: False
+  save_strategy: "steps"
+  save_steps: 50000
+  eval_strategy: "steps"
+  eval_steps: 10000
+  eval_accumulation_steps: 50
+  per_device_eval_batch_size: 4
+

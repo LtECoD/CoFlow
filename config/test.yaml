@@ -13,12 +13,7 @@ model:
   d_model: 256
   n_layers: 4
   n_heads: 4
-  directional: True
-  # finetune_esm: true
-  # d_time: 512
-  # d_model: 1536
-  # n_layers: 48
-  # n_heads: 24
+  directional: False
   eps: 1.e-10
   simplified_encoder: True
   train_async: True
@@ -38,8 +33,8 @@ train:
   save_total_limit: 10
   output_dir: "./save/test"
   overwrite_output_dir: True
-  bf16: False
-  fp16: True
+  bf16: True
+  fp16: False
   save_strategy: "steps"
   save_steps: 1000
   eval_strategy: "steps"
