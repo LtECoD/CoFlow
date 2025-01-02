@@ -64,7 +64,7 @@ class Flow(nn.Module):
     @torch.no_grad()
     def sample(
         self,
-        denoise_func,
+        denoise_func,        
         strategy:str,
         length=None,
         steps:int=100,
@@ -75,6 +75,7 @@ class Flow(nn.Module):
         sequence_temp=1.,
         structure_temp=1.,
         device="cpu",
+        sample=True,
     ):
         """
         strategy:
@@ -119,6 +120,9 @@ class Flow(nn.Module):
             structure_temp=structure_temp,
             eta=eta,
             purity=purity,
+            sample=sample,
+            sequence_mask=sequence_mask,
+            structure_mask=structure_mask,
         )
 
         # estimate probs
@@ -126,7 +130,6 @@ class Flow(nn.Module):
             denoise_func(structure=structure, sequence=sequence, t=torch.Tensor([[1]]).to(device))
         struc_probs = torch.softmax(struc_logits, dim=-1)
         seq_probs = torch.softmax(seq_logits, dim=-1)
-        
         
         struc_probs[~structure_mask, :] = \
             F.one_hot(structure, num_classes=struc_probs.size(-1))[~structure_mask, :].float()
@@ -153,7 +156,7 @@ class Flow(nn.Module):
                 structure=structure, sequence=sequence, denoise_func=denoise_func, **kwargs)
         return structure, sequence
 
-    def sample_parallel(self, structure, sequence, denoise_func, joint, **kwargs):        
+    def sample_parallel(self, structure, sequence, denoise_func, joint, **kwargs):
         desc = "Sample Parallel " + ("Joint" if joint else "Peroidical")
         for idx in tqdm(range(kwargs['steps']), desc=desc):
             t = torch.Tensor([[idx/kwargs['steps']]]).to(kwargs['device'])
@@ -165,26 +168,32 @@ class Flow(nn.Module):
                 seq_probs = torch.softmax(seq_logits/kwargs['sequence_temp'], dim=-1)
             
                 structure, sequence = self._sample_next_joint(
-                    struc_probs=struc_probs, struc_xt=structure, seq_probs=seq_probs, seq_xt=sequence,
-                    N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'])
+                    struc_probs=struc_probs, struc_xt=structure, struc_mask=kwargs['structure_mask'],
+                    seq_probs=seq_probs, seq_xt=sequence, seq_mask=kwargs['sequence_mask'],
+                    N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'], sample=kwargs['sample'])
             else:
-                _, seq_logits = denoise_func(structure=structure, sequence=sequence, t=t)
-                seq_probs = torch.softmax(seq_logits/kwargs['sequence_temp'], dim=-1)
-                sequence = self._sample_next_single(
-                    probs=seq_probs, xt=sequence, mask_token=C.SEQUENCE_MASK_TOKEN,
-                    N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity']
-                )
+                if torch.sum(sequence == C.SEQUENCE_MASK_TOKEN) != 0:       # sequence is not given
+                    _, seq_logits = denoise_func(structure=structure, sequence=sequence, t=t)
+                    seq_probs = torch.softmax(seq_logits/kwargs['sequence_temp'], dim=-1)
+                    sequence = self._sample_next_single(
+                        probs=seq_probs, xt=sequence, mask_token=C.SEQUENCE_MASK_TOKEN, mask=kwargs['sequence_mask'],
+                        N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'], sample=kwargs['sample']
+                    )
 
-                struc_logits, _ = denoise_func(structure=structure, sequence=sequence, t=t)
-                struc_probs = torch.softmax(struc_logits/kwargs['structure_temp'], dim=-1)
-                structure = self._sample_next_single(
-                    probs=struc_probs, xt=structure, mask_token=C.STRUCTURE_MASK_TOKEN,
-                    N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity']
-                )
+                if torch.sum(structure == C.STRUCTURE_MASK_TOKEN) != 0:       # structure is not given
+                    struc_logits, _ = denoise_func(structure=structure, sequence=sequence, t=t)
+                    struc_probs = torch.softmax(struc_logits/kwargs['structure_temp'], dim=-1)
+                    structure = self._sample_next_single(
+                        probs=struc_probs, xt=structure, mask_token=C.STRUCTURE_MASK_TOKEN, mask=kwargs['structure_mask'],
+                        N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'], sample=kwargs['sample']
+                    )
  
         return structure, sequence
     
     def _sample_structure(self, structure, sequence, denoise_func, **kwargs):
+        if torch.sum(kwargs['structure_mask']) == 0:     # structure is already given
+            return structure
+
         # generate structure
         for idx in tqdm(range(kwargs['steps']), desc="Sample Structure"):
             t = torch.Tensor([[idx/kwargs['steps']]]).to(kwargs['device'])
@@ -192,22 +201,25 @@ class Flow(nn.Module):
                 denoise_func(structure=structure, sequence=sequence, t=t)
             struc_probs = torch.softmax(struc_logits/kwargs['structure_temp'], dim=-1)
             structure = self._sample_next_single(
-                probs=struc_probs, xt=structure, mask_token=C.STRUCTURE_MASK_TOKEN,
-                N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'])
+                probs=struc_probs, xt=structure, mask_token=C.STRUCTURE_MASK_TOKEN, mask=kwargs['structure_mask'],
+                N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'], sample=kwargs['sample'])
         return structure 
 
     def _sample_sequence(self, structure, sequence, denoise_func, **kwargs):
+        if torch.sum(kwargs['sequence_mask']) == 0:       # sequence is already given
+            return sequence
+        
         for idx in tqdm(range(kwargs['steps']), desc="Sample Sequence"):
             t = torch.Tensor([[idx/kwargs['steps']]]).to(kwargs['device'])
             _, seq_logits = \
                 denoise_func(structure=structure, sequence=sequence, t=t)
             seq_probs = torch.softmax(seq_logits/kwargs['sequence_temp'], dim=-1)
             sequence = self._sample_next_single(
-                probs=seq_probs, xt=sequence, mask_token=C.SEQUENCE_MASK_TOKEN,
-                N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'])
+                probs=seq_probs, xt=sequence, mask_token=C.SEQUENCE_MASK_TOKEN, mask=kwargs['sequence_mask'],
+                N=kwargs["steps"], step=idx, eta=kwargs['eta'], purity=kwargs['purity'], sample=kwargs['sample'])
         return sequence
 
-    def _sample_next_single(self, probs, xt, mask_token, N, step, eta, purity=False):
+    def _sample_next_single(self, probs, xt, mask_token, mask, N, step, eta, purity=False, sample=True):
         """
         probs: 1, L, D
         xt: torch.LongTensor, 1, L
@@ -230,17 +242,20 @@ class Flow(nn.Module):
             will_unmask = torch.rand(B, L, device=device) < (dt * (1+eta*t) / (1.-t))
         will_mask = torch.rand(B, L, device=device) < (dt * eta)
 
-        will_unmask = will_unmask & (xt == mask_token)
-        will_mask = will_mask & (xt != mask_token)
+        will_unmask = will_unmask & (xt == mask_token) & mask
+        will_mask = will_mask & (xt != mask_token) & mask
         
-        x1 = Categorical(probs).sample()
+        if sample:
+            x1 = Categorical(probs).sample()
+        else:
+            x1 = torch.argmax(probs, dim=-1)
         next_xt = torch.where(will_unmask, x1, xt)
         
         if (step + 1) < N:
             next_xt[will_mask] = mask_token
         return next_xt
       
-    def _sample_next_joint(self, struc_probs, struc_xt, seq_probs, seq_xt, N, step, eta, purity):
+    def _sample_next_joint(self, struc_probs, struc_xt, seq_probs, seq_xt, struc_mask, seq_mask, N, step, eta, purity, sample=True):
         B, L = struc_xt.size()
         device = struc_xt.device
         
@@ -249,7 +264,8 @@ class Flow(nn.Module):
                 
         joint_mask = torch.cat(
             (struc_xt == C.STRUCTURE_MASK_TOKEN, seq_xt == C.SEQUENCE_MASK_TOKEN), dim=-1)      # B, 2L
-        
+        mask = torch.cat((struc_mask, seq_mask), dim=-1)                                        # B, 2L
+
         if purity:
             will_unmask_num = math.ceil(2*L * dt * (1+eta*t) / (1.-t))
             will_unmask_num = min(2*L, will_unmask_num)
@@ -260,14 +276,18 @@ class Flow(nn.Module):
             will_unmask = torch.rand(B, 2*L, device=device) < (dt * (1+eta*t) / (1.-t))
         will_mask = torch.rand(B, 2*L, device=device) < (dt * eta)
             
-        will_unmask = will_unmask & joint_mask
-        will_mask = will_mask & ~joint_mask
+        will_unmask = will_unmask & joint_mask & mask
+        will_mask = will_mask & ~joint_mask & mask
         
         struc_will_unmask, seq_will_unmask = will_unmask.split(L, dim=-1)
         struc_will_mask, seq_will_mask = will_mask.split(L, dim=-1)
         
-        struc_x1 = Categorical(struc_probs).sample()
-        seq_x1 = Categorical(seq_probs).sample()
+        if sample:
+            struc_x1 = Categorical(struc_probs).sample()
+            seq_x1 = Categorical(seq_probs).sample()
+        else:
+            struc_x1 = torch.argmax(struc_probs, dim=-1)
+            seq_x1 = torch.argmax(seq_probs, dim=-1)
         
         next_struc_xt = torch.where(struc_will_unmask, struc_x1, struc_xt)
         next_seq_xt = torch.where(seq_will_unmask, seq_x1, seq_xt)
