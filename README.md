@@ -1,13 +1,13 @@
 ## CoFlow
 
-CoFlow is a discrete generative model for protein sequence and strucure co-design based on our paper:
+CoFlow is a discrete generative model for protein sequence and structure co-design based on our paper:
 
 **Co-Design Protein Sequence and Structure in Discrete Space via Generative Flow**  
 <!-- Authors: [Author Names]  
 [Journal/Conference Name], [Year]  
 [DOI or arXiv Link (if available)] -->
 
-Our code is developed based on [ESM3](https://github.com/evolutionaryscale/esm).
+<!-- Our code is developed based on [ESM3](https://github.com/evolutionaryscale/esm). -->
 
 
 ## Dependencies
@@ -20,9 +20,9 @@ pip install -r requirements.txt
 ## Usage
 
 ### 1. Inference
-You can download trained model weights from [here](https://doi.org/10.5281/zenodo.14842367) to run CoFlow. Then unzip the file into any directory.
+You can download trained model weights from [here](https://doi.org/10.5281/zenodo.14842367) to run CoFlow. Then, unzip the file into any directory.
 
-Run the following python script to conduct unconditional generation: 
+Run the following Python script to conduct unconditional generation: 
 
 ```python
 import sys
@@ -73,14 +73,14 @@ out = model.sample(
     device=device,
 )
 ```
-Note: paramters of *sequence* and *structure* are list of indexed tokens. 
-Toknization procedure can be found in [ESM3](https://github.com/evolutionaryscale/esm).
+Note: parameters of *sequence* and *structure* are two lists of indexed tokens. 
+The tokenization procedure can be found in [ESM3](https://github.com/evolutionaryscale/esm).
 
 
 ### 1. Train
 
-To run training, you will need to pre-process datasets. The processed dataset include two .txt files. One is the sequence file, and each line represents a protein sequence. 
-Another file represents structure tokens processed by VQVAE encoder in ESM3, and each line represents a discrete protein structure. For example: 
+To run training, you will need to pre-process datasets. The processed dataset includes two .txt files. One is the sequence file, and each line represents a protein sequence. 
+Another file represents structure tokens processed by the VQVAE encoder in ESM3, and each line represents a discrete protein structure. For example: 
 > sequence line:
 >>908/MGYP003390323908 MKLIITLLLFVSLLPAYAAIMDGNCRDSQGSFRGEIIFREARHTQVVVGIRDRADYLNRGLAITFPRLELSGHKVVAQYSHPHYAGIGSEASRLEFDGALIRLTTLVRNAPNGSFNLSVSCLLDVPRDRQELGRLVREMNTH
 >
