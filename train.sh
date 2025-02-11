@@ -1,21 +1,15 @@
 #! /bin/bash
 
-#SBATCH --job-name pdbtune
-#SBATCH -p gpu
-#SBATCH -N 3
+#SBATCH --job-name train
+#SBATCH -p PARTION
+#SBATCH -N NODE_NUM
 #SBATCH --ntasks-per-node 1
-#SBATCH --gpus-per-node 4                   
-#SBATCH --cpus-per-task 4
+#SBATCH --gpus-per-node GPU_NUM                 
+#SBATCH --cpus-per-task CPU_NUM
 #SBATCH --gpu-bind=none
-#SBATCH --output ./log/coflow_pdb.out
-#SBATCH --error ./log/coflow_pdb.err
-#SBATCH --exclusive
 
-module load cuda/12.4
-eval "$(conda shell.bash hook)"
-conda activate esm3
 
-export NPROC_PER_NODE=4
+export NPROC_PER_NODE=GPU_NUM
 export OMP_NUM_THREADS=8
 export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
@@ -30,5 +24,4 @@ srun torchrun \
     --rdzv_id $RANDOM \
     --rdzv_backend c10d \
     --rdzv_endpoint ${MASTER_ADDR}:${MASTER_PORT} \
-    source/train.py config/finetune_pdb.yaml
-
+    source/train.py config/finetune.yaml
