@@ -1,7 +1,6 @@
 ## CoFlow
 
-CoFlow is a discrete generative model for protein sequence and structure co-design based on our paper:
-
+CoFlow is a discrete generative model for protein sequence and structure co-design, as described in our paper:
 **Co-Design Protein Sequence and Structure in Discrete Space via Generative Flow**  
 <!-- Authors: [Author Names]  
 [Journal/Conference Name], [Year]  
@@ -12,17 +11,17 @@ CoFlow is a discrete generative model for protein sequence and structure co-desi
 
 ## Dependencies
 
-To run the source code, please install the following dependencies:
+To run the source code, install the required dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
 ## Usage
 
-### 1. Inference
-You can download trained model weights from [here](https://doi.org/10.5281/zenodo.14842367) to run CoFlow. Then, unzip the file into any directory.
+### Inference
+Download the trained model weights from [here](https://doi.org/10.5281/zenodo.14842367), and extract them to a directory of your choice.
 
-Run the following Python script to conduct unconditional generation: 
+To perform unconditional generation, run the following Python script:
 
 ```python
 import sys
@@ -58,7 +57,7 @@ protein.to_pdb(OUT_PDB_PATH)
 
 ```
 
-To conduct conditional generation, you are required to feed sequence/structure/motif tokens to the model. Just like this:
+For conditional generation, provide sequence, structure, or motif tokens as input:
 ```python
 out = model.sample(
     sequence=SEQUENCE,
@@ -73,26 +72,43 @@ out = model.sample(
     device=device,
 )
 ```
-Note: parameters of *sequence* and *structure* are two lists of indexed tokens. 
-The tokenization procedure can be found in [ESM3](https://github.com/evolutionaryscale/esm).
+Note: The sequence and structure parameters should be lists of indexed tokens. The tokenization process is detailed in [ESM3](https://github.com/evolutionaryscale/esm).
 
 
-### 1. Train
+### Train
 
-To run training, you will need to pre-process datasets. The processed dataset includes two .txt files. One is the sequence file, and each line represents a protein sequence. 
-Another file represents structure tokens processed by the VQVAE encoder in ESM3, and each line represents a discrete protein structure. For example: 
-> sequence line:
+To train the model, you will need to pre-process dataset. Just run the following script:
+```bash
+python source/preprocess.py
+```
+
+Several parameters need to be specified in the script, including:
+
+- `fp_txt`: Path to a text file containing PDB file paths
+- `meta_fp`: Path to store metadata
+- `txt_out`: Path to save processed data
+
+You can also customize other parameters to control filtering granularity.
+
+The processed dataset consists of two `.txt` files:
+
+1. A sequence file, where each line corresponds to a protein sequence.
+2. A structure token file, where each line represents a discrete protein structure, encoded using the VQVAE model in ESM3.
+
+**Example:**
+> **Sequence line:**
 >>908/MGYP003390323908 MKLIITLLLFVSLLPAYAAIMDGNCRDSQGSFRGEIIFREARHTQVVVGIRDRADYLNRGLAITFPRLELSGHKVVAQYSHPHYAGIGSEASRLEFDGALIRLTTLVRNAPNGSFNLSVSCLLDVPRDRQELGRLVREMNTH
 >
-> structure line:
+> **Structure line:**
 >> 908/MGYP003390323908 1035 3954 305 3961 3961 2082 588 3101 588 3109 2439 3227 1763 852 1364 943 3799 3617 3106 177 3705 1220 3892 2520 3683 2945 2886 1805 3013 1862 194 1167 1487 2670 1191 3857 2302 163 3975 2293 1582 3211 322 3737 2446 560 1534 1177 697 794 1179 3994 3023 2983 2816 3148 1033 1395 2556 1712 3949 189 2536 2194 1451 1619 3509 1011 3332 872 1272 3660 3904 2463 3677 1419 767 2269 1399 1179 741 3378 1404 1993 82 1786 1204 795 3052 2452 496 3889 3331 2861 634 1057 978 1186 2781 2989 189 3166 1809 1547 2832 1367 276 4084 1076 2769 800 1480 1862 3721 3538 3362 1785 2081 3556 2557 2259 2756 1713 2331 2780 594 1169 1412 2776 3961 588 778 668 588 2587 1695 2048 1414 2425 2080 2103 969
 
 
-
-We train CoFlow with the High confidence MGnify30 structures in [ESMAtlas](https://github.com/facebookresearch/esm/tree/main/scripts/atlas). The finetune dataset is from [MultiFlow](https://github.com/jasonkyuyim/multiflow)
+CoFlow is trained with two datasets:
+- [High confidence MGnify30 structures](https://github.com/facebookresearch/esm/blob/main/scripts/atlas/v0/highquality_clust30/tarballs.txt) 
+- [Processed PDB](https://zenodo.org/records/10714631?token=eyJhbGciOiJIUzUxMiJ9.eyJpZCI6IjJjMTk2YjlmLTM4OTUtNGVhYi1hODcxLWE1ZjExOTczY2IzZiIsImRhdGEiOnt9LCJyYW5kb20iOiI4MDY5ZDUzYjVjMTNhNDllMDYxNmI3Yjc2NjcwYjYxZiJ9.C2eZZmRu-nu7H330G-DkV5kttfjYB3ANozdOMNm19uPahvtLrDRvd_4Eqlyb7lp24m06e4OHhHQ4zlj68S1O_A)
 
 
 ## License
 
-Our model and code are released under [Cambrian Open License](https://www.evolutionaryscale.ai/policies/cambrian-open-license-agreement)
+The model and code are released under the [Cambrian Open License](https://www.evolutionaryscale.ai/policies/cambrian-open-license-agreement)
 
