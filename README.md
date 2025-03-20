@@ -13,24 +13,29 @@ CoFlow is a discrete generative model for protein sequence and structure co-desi
 
 To run the source code, install the required dependencies:
 ```bash
-pip install -r requirements.txt
+# Install environment with dependencies.
+conda env create -n coflow -f requirements.yaml
+
+# Activate environment
+conda activate coflow
 ```
 
 ## Usage
 
 ### Inference
-Download the trained model weights from [here](https://doi.org/10.5281/zenodo.14842367), and extract them to a directory of your choice.
+Note: Download the trained model weights from [here](https://doi.org/10.5281/zenodo.14842367), and extract them to the `checkpoint` directory.
 
-To perform unconditional generation, run the following Python script:
+We prepare an notebook [example.ipynb](./example.ipynb) to display how to use CoFlow. It includes unconditional generation and conditional generation examples.
+
+<!-- To perform unconditional generation, run the following Python script:
 
 ```python
 import sys
-sys.path.append(PATH TO THE SOURCE OF THIS REPO)
+sys.path.append("./source")
 
 from model import CoFlowModel
 from utils import to_protein
-from esm.pretrained import ESM3_structure_decoder_v0
-
+from esm.tokenization import StructureTokenizer, EsmSequenceTokenizer
 device="cuda:0"
 
 model = CoFlowModel.from_pretrained(CHECKPOINT PATH).to(device)
@@ -72,7 +77,7 @@ out = model.sample(
     device=device,
 )
 ```
-Note: The sequence and structure parameters should be lists of indexed tokens. The tokenization process is detailed in [ESM3](https://github.com/evolutionaryscale/esm).
+Note: The sequence and structure parameters should be lists of indexed tokens. The tokenization process is detailed in [ESM3](https://github.com/evolutionaryscale/esm). -->
 
 
 ### Train
