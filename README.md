@@ -23,7 +23,7 @@ conda activate coflow
 ## Usage
 
 ### Inference
-Note: Download the trained model weights from [here](https://doi.org/10.5281/zenodo.14842367), and extract them to the `checkpoint` directory. As a result, the `checkpoint` will includes four files:
+Note: Download the trained model weights from [here](https://doi.org/10.5281/zenodo.14842367), and extract them to the `checkpoint` directory. As a result, the `checkpoint` will include four files:
 
 checkpoint \
 ├── config.json \
@@ -32,8 +32,15 @@ checkpoint \
 ├── model.safetensors.index.json \
 └── version 
 
-We prepare an notebook [example.ipynb](./example.ipynb) to display how to use CoFlow. It includes unconditional generation and conditional generation examples.
+CoFlow takes pre-trained structure VQ-VAE of ESM3 for tokenization. Therefore, running inference requires that you have access to the ESM3 weights. Make sure your huggingface account has access to "[EvolutionaryScale/esm3-sm-open-v1](https://huggingface.co/EvolutionaryScale/esm3-sm-open-v1/tree/main)". Then generate your huggingface access token (check the permissions to repositories) and run the following command to download the weights:
+```bash
+huggingface-cli login   
+# input your huggingface access token
+huggingface-cli download EvolutionaryScale/esm3-sm-open-v1
+```
+Downloaded files are typically located at "~/.cache/huggingface/hub/models--EvolutionaryScale--esm3-sm-open-v1".
 
+Notebook [example.ipynb](./example.ipynb) provides several examples to display how to use CoFlow, including unconditional generation and conditional generation examples.
 <!-- To perform unconditional generation, run the following Python script:
 
 ```python
