@@ -23,7 +23,14 @@ conda activate coflow
 ## Usage
 
 ### Inference
-Note: Download the trained model weights from [here](https://doi.org/10.5281/zenodo.14842367), and extract them to the `checkpoint` directory.
+Note: Download the trained model weights from [here](https://doi.org/10.5281/zenodo.14842367), and extract them to the `checkpoint` directory. As a result, the `checkpoint` will includes four files:
+
+checkpoint \
+├── config.json \
+├── model-00001-of-00002.safetensors \
+├── model-00002-of-00002.safetensors \
+├── model.safetensors.index.json \
+└── version 
 
 We prepare an notebook [example.ipynb](./example.ipynb) to display how to use CoFlow. It includes unconditional generation and conditional generation examples.
 
