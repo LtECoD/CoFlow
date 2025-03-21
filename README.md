@@ -41,7 +41,8 @@ checkpoint \
 ├── model.safetensors.index.json \
 └── version 
 
-Notebook [example.ipynb](./example.ipynb) provides several examples to display how to use CoFlow, including unconditional generation and conditional generation examples.
+See the notebook [example.ipynb](./example.ipynb) for information on how to use CoFlow, which includes examples of both unconditional and conditional generation.
+
 <!-- To perform unconditional generation, run the following Python script:
 
 ```python
